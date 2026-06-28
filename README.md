@@ -1,8 +1,8 @@
 # RePlan-app
 
 
-[연동 규격]
-설명: 선택한 유저의 이번 주 '고정 일정'과 'AI 생성 일정'을 조회
+
+선택한 유저의 이번 주 '고정 일정'과 'AI 생성 일정' 조회 [연동 규격]
 
 요청 주소: GET http://localhost:8080/schedules/weekly
 
