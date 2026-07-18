@@ -67,12 +67,11 @@ public class ScheduleService {
         taskRepository.save(task);
     }
 
-    // 4. AI 생성 로직 (일단 비워두고, 호출부만 남겨서 빨간 줄 제거)
+    // 4. AI 생성 로직
     public void generateAiSchedule(Long userId) {
         List<Task> tasks = taskRepository.findByUserId(userId);
         List<FixedSchedule> fixedSchedules = fixedRepository.findByUserId(userId);
 
-        // 데이터가 잘 불러와지는지 콘솔에서 확인해보자
         System.out.println("조회된 태스크 개수: " + tasks.size());
     }
 }
