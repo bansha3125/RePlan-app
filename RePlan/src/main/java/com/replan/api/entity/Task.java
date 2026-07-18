@@ -1,14 +1,14 @@
 package com.replan.api.entity;
 
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+import lombok.*;
 import java.time.LocalDateTime;
 
 @Entity
 @Getter
 @Setter
+@Builder
+@AllArgsConstructor
 @NoArgsConstructor
 public class Task {
 
@@ -22,11 +22,14 @@ public class Task {
     @Column(nullable = false)
     private String title;
 
-    private Integer estimatedTime; // 분 단위
+    private Integer estimatedMinutes;
 
     private LocalDateTime deadline;
 
-    private Integer priority; // 1~5
+    private Integer priority;
 
     private Boolean isCompleted = false;
+
+    private boolean useAiDecomposition;
+    private int desiredSteps;
 }

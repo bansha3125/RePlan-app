@@ -1,12 +1,18 @@
 package com.replan.api.service;
 
 import com.replan.api.dto.FixedScheduleDto;
+import com.replan.api.dto.FixedScheduleRequest;
+import com.replan.api.dto.TaskRequest;
 import com.replan.api.dto.WeeklyScheduleResponse;
 import com.replan.api.entity.FixedSchedule;
+import com.replan.api.entity.Task;
 import com.replan.api.repository.FixedScheduleRepository;
 import com.replan.api.repository.GeneratedScheduleRepository;
+import com.replan.api.repository.TaskRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -16,12 +22,11 @@ public class ScheduleService {
 
     private final FixedScheduleRepository fixedRepository;
     private final GeneratedScheduleRepository generatedRepository;
+    private final TaskRepository taskRepository;
 
+    // 1. 주간 스케줄 조회
     public WeeklyScheduleResponse getWeeklySchedules(Long userId) {
-        // 1. DB에서 해당 유저의 고정 일정을 싹 다 가져와!
         List<FixedSchedule> fixedList = fixedRepository.findAll();
-
-        // 2. 가져온 엔티티들을 DTO(우리가 약속한 그릇)로 변환해줘야 해.
         List<FixedScheduleDto> fixedDtos = fixedList.stream()
                 .map(f -> FixedScheduleDto.builder()
                         .title(f.getTitle())
@@ -31,10 +36,43 @@ public class ScheduleService {
                         .build())
                 .toList();
 
-        // 3. 응답에 담아서 보내!
         return WeeklyScheduleResponse.builder()
                 .fixedSchedules(fixedDtos)
                 .generatedSchedules(new ArrayList<>())
                 .build();
+    }
+
+    // 2. 고정 일정 저장
+    public void saveFixedSchedule(FixedScheduleRequest request) {
+        FixedSchedule schedule = FixedSchedule.builder()
+                .userId(request.getUserId())
+                .title(request.getTitle())
+                .startTime(LocalDateTime.parse(request.getStartTime()))
+                .endTime(LocalDateTime.parse(request.getEndTime()))
+                .repeatDay(request.getRepeatDay())
+                .build();
+        fixedRepository.save(schedule);
+    }
+
+    // 3. 할 일 저장
+    public void saveTask(TaskRequest request) {
+        Task task = Task.builder()
+                .userId(request.getUserId())
+                .title(request.getTitle())
+                .deadline(LocalDateTime.parse(request.getDeadline()))
+                .estimatedMinutes(request.getEstimatedMinutes())
+                .useAiDecomposition(request.isUseAiDecomposition())
+                .desiredSteps(request.getDesiredSteps())
+                .build();
+        taskRepository.save(task);
+    }
+
+    // 4. AI 생성 로직 (일단 비워두고, 호출부만 남겨서 빨간 줄 제거)
+    public void generateAiSchedule(Long userId) {
+        List<Task> tasks = taskRepository.findByUserId(userId);
+        List<FixedSchedule> fixedSchedules = fixedRepository.findByUserId(userId);
+
+        // 데이터가 잘 불러와지는지 콘솔에서 확인해보자
+        System.out.println("조회된 태스크 개수: " + tasks.size());
     }
 }

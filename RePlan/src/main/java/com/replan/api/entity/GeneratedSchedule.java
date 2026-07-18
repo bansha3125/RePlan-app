@@ -26,5 +26,5 @@ public class GeneratedSchedule {
     private LocalDateTime endTime;
 
     @Column(nullable = false)
-    private Boolean isPinned = false; // 핵심: 드래그 앤 드롭 고정 여부
+    private Boolean isPinned = false;
 }

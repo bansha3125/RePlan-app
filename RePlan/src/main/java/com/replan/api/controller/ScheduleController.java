@@ -1,12 +1,11 @@
 package com.replan.api.controller;
 
+import com.replan.api.dto.FixedScheduleRequest;
+import com.replan.api.dto.TaskRequest;
 import com.replan.api.dto.WeeklyScheduleResponse;
 import com.replan.api.service.ScheduleService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/schedules")
@@ -19,5 +18,17 @@ public class ScheduleController {
     public WeeklyScheduleResponse getWeeklySchedule(@RequestParam Long userId) {
         // DB조회 및 데이터 할당
         return scheduleService.getWeeklySchedules(userId);
+    }
+
+    @PostMapping("/fixed-schedules")
+    public String addFixedSchedule(@RequestBody FixedScheduleRequest request) {
+        scheduleService.saveFixedSchedule(request); //
+        return "고정 일정 저장 성공!";
+    }
+
+    @PostMapping("/tasks")
+    public String addTask(@RequestBody TaskRequest request) {
+        scheduleService.saveTask(request);
+        return "할 일 저장 성공!";
     }
 }
