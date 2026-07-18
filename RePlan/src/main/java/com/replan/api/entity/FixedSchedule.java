@@ -7,21 +7,17 @@ import java.time.LocalDateTime;
 @Entity
 @Getter
 @Builder
-@AllArgsConstructor
 @NoArgsConstructor
+@AllArgsConstructor
 public class FixedSchedule {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long fixedId;
+    private Long scheduleId;
 
-    @Column(nullable = false)
     private Long userId;
-
     private String title;
-
     private LocalDateTime startTime;
     private LocalDateTime endTime;
-
-    private String repeatDay; // 예: "MON,WED"
+    private String repeatDay;
 }

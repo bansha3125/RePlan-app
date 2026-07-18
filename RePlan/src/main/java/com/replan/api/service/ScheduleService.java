@@ -1,26 +1,19 @@
 package com.replan.api.service;
 
-import com.replan.api.dto.FixedScheduleDto;
-import com.replan.api.dto.FixedScheduleRequest;
-import com.replan.api.dto.TaskRequest;
-import com.replan.api.dto.WeeklyScheduleResponse;
-import com.replan.api.entity.FixedSchedule;
-import com.replan.api.entity.GeneratedSchedule;
-import com.replan.api.entity.Task;
-import com.replan.api.repository.FixedScheduleRepository;
-import com.replan.api.repository.GeneratedScheduleRepository;
-import com.replan.api.repository.TaskRepository;
+import com.replan.api.dto.*;
+import com.replan.api.entity.*;
+import com.replan.api.repository.*;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDateTime;
 import java.util.*;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.http.HttpMethod;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class ScheduleService {
@@ -30,14 +23,10 @@ public class ScheduleService {
     private final TaskRepository taskRepository;
     private final RestTemplate restTemplate;
 
-    private static final Logger log = LoggerFactory.getLogger(ScheduleService.class);
+    private static final String AI_SERVER_URL = "http://localhost:5000/ai/schedules/generate";
 
-    // 1. 주간 스케줄 조회
     public WeeklyScheduleResponse getWeeklySchedules(Long userId) {
-        // [수정됨] findAll() -> findByUserId(userId)로 변경하여 내 일정만 조회!
-        List<FixedSchedule> fixedList = fixedRepository.findByUserId(userId);
-
-        List<FixedScheduleDto> fixedDtos = fixedList.stream()
+        List<FixedScheduleDto> fixedDtos = fixedRepository.findByUserId(userId).stream()
                 .map(f -> FixedScheduleDto.builder()
                         .title(f.getTitle())
                         .startTime(f.getStartTime().toString())
@@ -48,78 +37,64 @@ public class ScheduleService {
 
         return WeeklyScheduleResponse.builder()
                 .fixedSchedules(fixedDtos)
-                .generatedSchedules(new ArrayList<>()) // AI 일정은 아직 조회 로직 미구현이라 빈 리스트로 둠
+                .generatedSchedules(new ArrayList<>())
                 .build();
     }
 
-    // 2. 고정 일정 저장
     public void saveFixedSchedule(FixedScheduleRequest request) {
-        FixedSchedule schedule = FixedSchedule.builder()
+        fixedRepository.save(FixedSchedule.builder()
                 .userId(request.getUserId())
                 .title(request.getTitle())
                 .startTime(LocalDateTime.parse(request.getStartTime()))
                 .endTime(LocalDateTime.parse(request.getEndTime()))
                 .repeatDay(request.getRepeatDay())
-                .build();
-        fixedRepository.save(schedule);
+                .build());
     }
 
-    // 3. 할 일 저장
     public void saveTask(TaskRequest request) {
-        Task task = Task.builder()
+        taskRepository.save(Task.builder()
                 .userId(request.getUserId())
                 .title(request.getTitle())
                 .deadline(LocalDateTime.parse(request.getDeadline()))
                 .estimatedMinutes(request.getEstimatedMinutes())
                 .useAiDecomposition(request.isUseAiDecomposition())
                 .desiredSteps(request.getDesiredSteps())
-                .build();
-        taskRepository.save(task);
+                .build());
     }
 
-    // 4. AI 생성 로직
     public void generateAiSchedule(Long userId) {
-        List<Task> tasks = taskRepository.findByUserId(userId);
-        List<FixedSchedule> fixedSchedules = fixedRepository.findByUserId(userId);
-
         Map<String, Object> aiRequest = new HashMap<>();
-        aiRequest.put("tasks", tasks);
-        aiRequest.put("fixedSchedules", fixedSchedules);
-
-        String aiServerUrl = "http://localhost:5000/ai/schedules/generate";
+        aiRequest.put("tasks", taskRepository.findByUserId(userId));
+        aiRequest.put("fixedSchedules", fixedRepository.findByUserId(userId));
 
         try {
             List<Map<String, Object>> aiResponse = restTemplate.exchange(
-                    aiServerUrl,
+                    AI_SERVER_URL,
                     HttpMethod.POST,
-                    new org.springframework.http.HttpEntity<>(aiRequest),
+                    new HttpEntity<>(aiRequest),
                     new ParameterizedTypeReference<List<Map<String, Object>>>() {}
             ).getBody();
 
-            log.info("AI 서버 응답 결과: {}", aiResponse);
+            log.info("AI 스케줄 생성 성공, 결과 수신 완료");
             saveGeneratedSchedules(aiResponse, userId);
 
         } catch (Exception e) {
-            log.error("AI 서버 통신 중 에러 발생: {}", e.getMessage());
+            log.error("AI 서버 통신 실패: {}", e.getMessage());
         }
     }
 
     private void saveGeneratedSchedules(List<Map<String, Object>> aiResponse, Long userId) {
         if (aiResponse == null || aiResponse.isEmpty()) return;
 
-        List<GeneratedSchedule> schedulesToSave = new ArrayList<>();
+        List<GeneratedSchedule> schedules = aiResponse.stream()
+                .map(map -> GeneratedSchedule.builder()
+                        .userId(userId)
+                        .title((String) map.get("title"))
+                        .startTime(LocalDateTime.parse((String) map.get("startTime")))
+                        .endTime(LocalDateTime.parse((String) map.get("endTime")))
+                        .build())
+                .toList();
 
-        for (Map<String, Object> scheduleMap : aiResponse) {
-            GeneratedSchedule generatedSchedule = GeneratedSchedule.builder()
-                    .userId(userId)
-                    .title((String) scheduleMap.get("title"))
-                    .startTime(LocalDateTime.parse((String) scheduleMap.get("startTime")))
-                    .endTime(LocalDateTime.parse((String) scheduleMap.get("endTime")))
-                    .build();
-
-            schedulesToSave.add(generatedSchedule);
-        }
-
-        generatedRepository.saveAll(schedulesToSave);
+        generatedRepository.saveAll(schedules);
     }
 }

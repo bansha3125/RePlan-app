@@ -18,14 +18,13 @@ public class GeneratedSchedule {
     @Column(nullable = false)
     private Long userId;
 
-    @Column(nullable = false)
     private Long taskId;
+
+    private String title;
 
     private LocalDateTime startTime;
     private LocalDateTime endTime;
 
-    @Column(nullable = false)
+    @Builder.Default
     private Boolean isPinned = false;
-
-    private String title;
 }
