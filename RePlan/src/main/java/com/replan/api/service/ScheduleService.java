@@ -26,7 +26,6 @@ public class ScheduleService {
     private static final String AI_SERVER_URL = "http://localhost:5000/ai/schedules/generate";
 
     public WeeklyScheduleResponse getWeeklySchedules(Long userId) {
-        // 1. 고정 일정 조회
         List<FixedScheduleDto> fixedDtos = fixedRepository.findByUserId(userId).stream()
                 .map(f -> FixedScheduleDto.builder()
                         .title(f.getTitle())
@@ -36,7 +35,6 @@ public class ScheduleService {
                         .build())
                 .toList();
 
-        // 2. AI가 생성한 일정 조회
         List<GeneratedScheduleDto> generatedDtos = generatedRepository.findByUserId(userId).stream()
                 .map(g -> GeneratedScheduleDto.builder()
                         .title(g.getTitle())
@@ -47,7 +45,7 @@ public class ScheduleService {
 
         return WeeklyScheduleResponse.builder()
                 .fixedSchedules(fixedDtos)
-                .generatedSchedules(generatedDtos) // DTO 리스트를 장착!
+                .generatedSchedules(generatedDtos)
                 .build();
     }
 
@@ -73,11 +71,13 @@ public class ScheduleService {
     }
 
     public void generateAiSchedule(Long userId) {
+        // 1. AI 서버로 보낼 사용자 Task 및 고정 일정 데이터 구성
         Map<String, Object> aiRequest = new HashMap<>();
         aiRequest.put("tasks", taskRepository.findByUserId(userId));
         aiRequest.put("fixedSchedules", fixedRepository.findByUserId(userId));
 
         try {
+            // 2. 파이썬 AI 서버(FastAPI)로 POST 요청 전송 및 응답 수신
             List<Map<String, Object>> aiResponse = restTemplate.exchange(
                     AI_SERVER_URL,
                     HttpMethod.POST,
@@ -86,6 +86,8 @@ public class ScheduleService {
             ).getBody();
 
             log.info("AI 스케줄 생성 성공, 결과 수신 완료");
+
+            // 3. 수신받은 AI 생성 일정을 DB에 저장
             saveGeneratedSchedules(aiResponse, userId);
 
         } catch (Exception e) {
