@@ -3,32 +3,61 @@ package com.replan.api.controller;
 import com.replan.api.dto.FixedScheduleRequest;
 import com.replan.api.dto.TaskRequest;
 import com.replan.api.dto.WeeklyScheduleResponse;
+import com.replan.api.entity.FixedSchedule;
+import com.replan.api.entity.Task;
+import com.replan.api.repository.FixedScheduleRepository;
+import com.replan.api.repository.TaskRepository;
 import com.replan.api.service.ScheduleService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/schedules")
-@RequiredArgsConstructor // 생성자 주입을 위해 추가!
+@RequiredArgsConstructor
 public class ScheduleController {
 
-    private final ScheduleService scheduleService; // 서비스 주입
+    private final ScheduleService scheduleService;
+    private final TaskRepository taskRepository;
+    private final FixedScheduleRepository fixedRepository;
 
+    // 1. 주간 일정 조회 (GET /schedules/weekly?userId=1)
     @GetMapping("/weekly")
     public WeeklyScheduleResponse getWeeklySchedule(@RequestParam Long userId) {
-        // DB조회 및 데이터 할당
         return scheduleService.getWeeklySchedules(userId);
     }
 
+    // 2. 고정 일정 저장 (POST /schedules/fixed-schedules)
     @PostMapping("/fixed-schedules")
     public String addFixedSchedule(@RequestBody FixedScheduleRequest request) {
-        scheduleService.saveFixedSchedule(request); //
+        scheduleService.saveFixedSchedule(request);
         return "고정 일정 저장 성공!";
     }
 
+    // 3. 고정 일정 조회 (GET /schedules/fixed-schedules?userId=1)
+    @GetMapping("/fixed-schedules")
+    public List<FixedSchedule> getFixedSchedules(@RequestParam Long userId) {
+        return fixedRepository.findByUserId(userId);
+    }
+
+    // 4. 할 일 저장 (POST /schedules/tasks)
     @PostMapping("/tasks")
     public String addTask(@RequestBody TaskRequest request) {
         scheduleService.saveTask(request);
         return "할 일 저장 성공!";
+    }
+
+    // 5. 할 일 조회 (GET /schedules/tasks?userId=1)
+    @GetMapping("/tasks")
+    public List<Task> getTasks(@RequestParam Long userId) {
+        return taskRepository.findByUserId(userId);
+    }
+
+    // 6. AI 일정 생성 및 DB 저장 요청 (POST /schedules/generate?userId=1)
+    @PostMapping("/generate")
+    public String generateAiSchedule(@RequestParam Long userId) {
+        scheduleService.generateAiSchedule(userId);
+        return "AI 스케줄 생성 및 DB 저장 요청 완료!";
     }
 }

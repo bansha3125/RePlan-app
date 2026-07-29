@@ -26,6 +26,7 @@ public class ScheduleService {
     private static final String AI_SERVER_URL = "http://localhost:5000/ai/schedules/generate";
 
     public WeeklyScheduleResponse getWeeklySchedules(Long userId) {
+        // 1. 고정 일정 조회
         List<FixedScheduleDto> fixedDtos = fixedRepository.findByUserId(userId).stream()
                 .map(f -> FixedScheduleDto.builder()
                         .title(f.getTitle())
@@ -35,9 +36,18 @@ public class ScheduleService {
                         .build())
                 .toList();
 
+        // 2. AI가 생성한 일정 조회
+        List<GeneratedScheduleDto> generatedDtos = generatedRepository.findByUserId(userId).stream()
+                .map(g -> GeneratedScheduleDto.builder()
+                        .title(g.getTitle())
+                        .startTime(g.getStartTime().toString())
+                        .endTime(g.getEndTime().toString())
+                        .build())
+                .toList();
+
         return WeeklyScheduleResponse.builder()
                 .fixedSchedules(fixedDtos)
-                .generatedSchedules(new ArrayList<>())
+                .generatedSchedules(generatedDtos) // DTO 리스트를 장착!
                 .build();
     }
 
