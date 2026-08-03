@@ -888,7 +888,7 @@ def _build_schedule_changes(
 ) -> list[dict[str, Any]]:
     """
     재배치 전후 일정을 blockId로 비교해서
-    CREATED, MOVED, KEPT, REMOVED를 생성한다.
+    CREATED, SPLIT, MOVED, KEPT, REMOVED를 생성한다.
     """
 
     completed_ids = {
@@ -896,14 +896,11 @@ def _build_schedule_changes(
         for task_id in completed_task_ids
     }
 
-    before_map: dict[
-        str,
-        dict[str, Any],
-    ] = {}
+    before_map: dict[str, dict[str, Any]] = {}
 
     for item in before_schedules:
-        normalized = (
-            _normalize_backend_schedule(item)
+        normalized = _normalize_backend_schedule(
+            item
         )
 
         if not normalized["blockId"]:
@@ -917,14 +914,11 @@ def _build_schedule_changes(
             normalized["blockId"]
         ] = normalized
 
-    after_map: dict[
-        str,
-        dict[str, Any],
-    ] = {}
+    after_map: dict[str, dict[str, Any]] = {}
 
     for item in after_schedules:
-        normalized = (
-            _normalize_backend_schedule(item)
+        normalized = _normalize_backend_schedule(
+            item
         )
 
         if not normalized["blockId"]:
@@ -940,20 +934,40 @@ def _build_schedule_changes(
     changes: list[dict[str, Any]] = []
     sequence = 1
 
-    # 생성, 이동, 유지 검사
+    # 생성, 분할, 이동, 유지 검사
     for block_id, after in after_map.items():
         before = before_map.get(block_id)
 
         if before is None:
-            action = "CREATED"
-            reason_code = (
-                after.get("reasonCode")
-                or "SCHEDULE_CREATED"
+            step_order_value = (
+                _extract_step_order(block_id)
             )
-            reason = (
-                after.get("reason")
-                or "새로운 일정을 생성했습니다."
+
+            # 첫 번째 블록은 CREATED,
+            # 두 번째 블록부터 SPLIT
+            is_split = (
+                after.get("source") == "GENERATED"
+                and step_order_value > 1
             )
+
+            if is_split:
+                action = "SPLIT"
+                reason_code = "TASK_SPLIT"
+                reason = (
+                    "긴 작업을 여러 일정 블록으로 "
+                    "나누어 배치했습니다."
+                )
+
+            else:
+                action = "CREATED"
+                reason_code = (
+                    after.get("reasonCode")
+                    or "SCHEDULE_CREATED"
+                )
+                reason = (
+                    after.get("reason")
+                    or "새로운 일정을 생성했습니다."
+                )
 
         elif (
             before["startTime"]
@@ -983,6 +997,7 @@ def _build_schedule_changes(
                     "사용자가 고정한 일정이므로 "
                     "기존 시간을 유지했습니다."
                 )
+
             else:
                 reason_code = "UNCHANGED"
                 reason = (
@@ -1031,6 +1046,7 @@ def _build_schedule_changes(
                 "완료한 작업이므로 "
                 "재배치 대상에서 제외했습니다."
             )
+
         else:
             reason_code = "REMOVED_FROM_PLAN"
             reason = (
@@ -1058,7 +1074,54 @@ def _build_schedule_changes(
 
         sequence += 1
 
+    # 같은 시간일 때 사용할 action 우선순위
+    action_priority = {
+        "REMOVED": 0,
+        "MOVED": 1,
+        "CREATED": 2,
+        "SPLIT": 3,
+        "KEPT": 4,
+    }
+
+    def change_sort_key(
+        change: dict[str, Any],
+    ) -> tuple[str, int, str, str]:
+        """
+        afterStartTime이 있으면 변경 후 시간을 사용하고,
+        REMOVED처럼 없으면 beforeStartTime을 사용한다.
+        """
+
+        sort_time = (
+            change.get("afterStartTime")
+            or change.get("beforeStartTime")
+            or ""
+        )
+
+        return (
+            str(sort_time),
+            action_priority.get(
+                str(change.get("action")),
+                99,
+            ),
+            str(change.get("taskId") or ""),
+            str(change.get("blockId") or ""),
+        )
+
+    # 변경 시간순으로 정렬
+    changes.sort(
+        key=change_sort_key
+    )
+
+    # 정렬 후 sequence를 다시 1부터 부여
+    for index, change in enumerate(
+        changes,
+        start=1,
+    ):
+        change["sequence"] = index
+
     return changes
+
+
 
 
 def replan_api_from_payload(
@@ -1094,6 +1157,12 @@ def replan_api_from_payload(
         if change["action"] == "CREATED"
     )
 
+    split_count = sum(
+        1
+        for change in changes
+        if change["action"] == "SPLIT"
+    )
+
     moved_count = sum(
         1
         for change in changes
@@ -1124,6 +1193,7 @@ def replan_api_from_payload(
 
     result["summary"].update({
         "createdCount": created_count,
+        "splitCount": split_count,
         "movedCount": moved_count,
         "keptCount": kept_count,
         "removedCount": removed_count,
