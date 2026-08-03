@@ -1,0 +1,2141 @@
+import unittest
+from datetime import datetime, timedelta, time
+
+from fastapi.testclient import TestClient
+from main import app
+
+from ai_scheduler.integration import (
+    _build_schedule_changes,
+)
+
+
+class TestAPIBase(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.client = TestClient(app)
+
+    def test_app_loads(self):
+        response = self.client.get("/openapi.json")
+
+        self.assertEqual(response.status_code, 200)
+
+        response_data = response.json()
+
+        self.assertIn("openapi", response_data)
+        self.assertIn("paths", response_data)
+
+    def test_required_api_paths_exist(self):
+        response = self.client.get("/openapi.json")
+
+        self.assertEqual(response.status_code, 200)
+
+        paths = response.json().get("paths", {})
+
+        self.assertIn("/schedules/generate", paths)
+        self.assertIn("/ai/schedules/replan", paths)
+
+    def test_generate_api_success(self):
+        """
+        generate API가 정상적으로 일정 생성 응답을 반환하는지 테스트한다.
+        """
+
+        # 테스트 실행일의 다음 날을 일정 생성 날짜로 사용
+        test_date = (datetime.now() + timedelta(days=1)).date()
+
+        # 해당 날짜가 포함된 주의 월요일과 일요일 계산
+        week_start = test_date - timedelta(days=test_date.weekday())
+        week_end = week_start + timedelta(days=6)
+
+        def make_datetime(hour: int, minute: int = 0) -> str:
+            return datetime.combine(
+                test_date,
+                time(hour=hour, minute=minute),
+            ).isoformat()
+
+        request_body = {
+            "requestId": "generate-test-001",
+            "userId": 1,
+            "weekStartDate": week_start.isoformat(),
+            "weekEndDate": week_end.isoformat(),
+            "timezone": "Asia/Seoul",
+            "tasks": [
+                {
+                    "taskId": 1,
+                    "title": "발표 자료 조사",
+                    "estimatedMinutes": 60,
+                    "deadline": make_datetime(18),
+                    "priority": 1,
+                    "difficulty": 2,
+                    "focusRequired": 2,
+                }
+            ],
+            "fixedSchedules": [
+                {
+                    "fixedScheduleId": 1,
+                    "title": "수업",
+                    "startTime": make_datetime(10),
+                    "endTime": make_datetime(12),
+                    "locked": True,
+                }
+            ],
+            "existingSchedules": [],
+        }
+
+        response = self.client.post(
+            "/schedules/generate",
+            json=request_body,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+            msg=f"generate API 호출 실패: {response.text}",
+        )
+
+        data = response.json()
+
+        # 결과 확인용 출력
+  
+
+        self.assertIn("success", data)
+
+        self.assertTrue(
+            data["success"],
+            msg=f"응답 success=false: {data}",
+        )
+
+        self.assertIn(
+            "schedules",
+            data,
+            msg=f"schedules 필드 없음: {data}",
+        )
+
+        schedules = data["schedules"]
+
+        self.assertIsInstance(
+            schedules,
+            list,
+            msg="schedules가 리스트가 아님",
+        )
+
+        self.assertGreater(
+            len(schedules),
+            0,
+            msg=f"생성된 일정이 없음. 전체 응답: {data}",
+        )
+
+        # taskId=1인 일정 찾기
+        generated_task = None
+
+        for schedule in schedules:
+            if str(schedule.get("taskId")) == "1":
+                generated_task = schedule
+                break
+
+        self.assertIsNotNone(
+            generated_task,
+            msg=f"taskId=1 일정이 생성되지 않음: {schedules}",
+        )
+
+        # 시간 필드 존재 확인
+        self.assertIn("startTime", generated_task)
+        self.assertIn("endTime", generated_task)
+
+        start_time = datetime.fromisoformat(
+            generated_task["startTime"]
+        )
+
+        end_time = datetime.fromisoformat(
+            generated_task["endTime"]
+        )
+
+        # 60분 배치됐는지 확인
+        duration_minutes = int(
+            (end_time - start_time).total_seconds() / 60
+        )
+
+        self.assertEqual(
+            duration_minutes,
+            60,
+            msg=f"배치 시간이 60분이 아님: {duration_minutes}분",
+        )
+
+        # 고정 일정 10:00~12:00과 겹치지 않는지 확인
+        fixed_start = datetime.fromisoformat(make_datetime(10))
+        fixed_end = datetime.fromisoformat(make_datetime(12))
+
+        overlaps = (
+            start_time < fixed_end
+            and end_time > fixed_start
+        )
+
+        self.assertFalse(
+            overlaps,
+            msg=f"생성 일정이 고정 일정과 겹침: {generated_task}",
+        )
+
+
+
+    def test_replan_api_success(self):
+        """
+        긴급 고정 일정이 추가되었을 때
+        기존 생성 일정이 겹치지 않는 시간으로 이동하는지 테스트한다.
+        """
+
+        # 테스트 실행일의 다음 날 사용
+        test_date = (datetime.now() + timedelta(days=1)).date()
+
+        week_start = test_date - timedelta(
+            days=test_date.weekday()
+        )
+        week_end = week_start + timedelta(days=6)
+
+        def make_datetime(hour: int, minute: int = 0) -> str:
+            return datetime.combine(
+                test_date,
+                time(hour=hour, minute=minute),
+            ).isoformat()
+
+        request_body = {
+            "requestId": "replan-test-001",
+            "userId": 1,
+            "weekStartDate": week_start.isoformat(),
+            "weekEndDate": week_end.isoformat(),
+            "timezone": "Asia/Seoul",
+
+            # 이 시간 이후의 일정을 다시 배치
+            "replanFromTime": make_datetime(9),
+
+            "tasks": [
+                {
+                    "taskId": 1,
+                    "title": "발표 자료 조사",
+                    "estimatedMinutes": 60,
+                    "deadline": make_datetime(18),
+                    "priority": 1,
+                    "difficulty": 2,
+                    "focusRequired": 2,
+                }
+            ],
+
+            # 새로 추가된 긴급 일정
+            "fixedSchedules": [
+                {
+                    "fixedScheduleId": 2,
+                    "title": "긴급 병원 예약",
+                    "startTime": make_datetime(9),
+                    "endTime": make_datetime(11),
+                    "locked": True,
+                }
+            ],
+
+            # 재배치 전 기존 AI 일정
+            "existingSchedules": [
+                {
+                    "blockId": "generated:1:step-1",
+                    "taskId": "1",
+                    "title": "발표 자료 조사",
+                    "stepOrder": 1,
+                    "startTime": make_datetime(9),
+                    "endTime": make_datetime(10),
+                    "source": "GENERATED",
+                    "locked": False,
+                    "reason": "기존 생성 일정",
+                }
+            ],      
+        }
+
+        response = self.client.post(
+            "/ai/schedules/replan",
+            json=request_body,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+            msg=f"replan API 호출 실패: {response.text}",
+        )
+
+        data = response.json()
+
+        
+
+        self.assertIn(
+            "success",
+            data,
+            msg=f"success 필드가 없음: {data}",
+        )
+
+        self.assertTrue(
+            data["success"],
+            msg=f"재배치 실패 응답: {data}",
+        )
+
+        self.assertIn(
+            "schedules",
+            data,
+            msg=f"schedules 필드가 없음: {data}",
+        )
+
+        schedules = data["schedules"]
+
+        self.assertIsInstance(
+            schedules,
+            list,
+            msg="schedules가 리스트가 아님",
+        )
+
+        self.assertGreater(
+            len(schedules),
+            0,
+            msg=f"재배치된 일정이 없음. 전체 응답: {data}",
+        )
+
+        # taskId=1인 재배치 결과 찾기
+        replanned_task = None
+
+        for schedule in schedules:
+            if str(schedule.get("taskId")) == "1":
+                replanned_task = schedule
+                break
+
+        self.assertIsNotNone(
+            replanned_task,
+            msg=f"taskId=1 재배치 결과가 없음: {schedules}",
+        )
+
+        self.assertIn("startTime", replanned_task)
+        self.assertIn("endTime", replanned_task)
+
+        replanned_start = datetime.fromisoformat(
+            replanned_task["startTime"]
+        )
+        replanned_end = datetime.fromisoformat(
+            replanned_task["endTime"]
+        )
+
+        urgent_start = datetime.fromisoformat(
+            make_datetime(9)
+        )
+        urgent_end = datetime.fromisoformat(
+            make_datetime(11)
+        )
+
+        # 병원 예약 09:00~11:00과 겹치는지 검사
+        overlaps = (
+            replanned_start < urgent_end
+            and replanned_end > urgent_start
+        )
+
+        self.assertFalse(
+            overlaps,
+            msg=(
+                "재배치된 일정이 긴급 병원 예약과 겹침: "
+                f"{replanned_task}"
+            ),
+        )
+
+        # 기존 09:00 일정이 11:00 이후로 이동했는지 검사
+        self.assertGreaterEqual(
+            replanned_start,
+            urgent_end,
+            msg=(
+                "기존 일정이 병원 예약 이후로 이동하지 않음: "
+                f"{replanned_task}"
+            ),
+        )
+
+        # 변경 기록에 MOVED가 포함됐는지 확인
+        changes = data.get("changes", [])
+
+        moved_exists = any(
+            change.get("action") == "MOVED"
+            for change in changes
+        )
+
+        self.assertTrue(
+            moved_exists,
+            msg=f"changes에 MOVED가 없음: {changes}",
+        )
+
+
+
+
+    def test_locked_schedule_is_preserved(self):
+        """
+        locked=true인 기존 일정이 재배치 후에도
+        같은 시간으로 유지되는지 테스트한다.
+        """
+
+        test_date = (datetime.now() + timedelta(days=1)).date()
+
+        week_start = test_date - timedelta(
+            days=test_date.weekday()
+        )
+        week_end = week_start + timedelta(days=6)
+
+        def make_datetime(hour: int, minute: int = 0) -> str:
+            return datetime.combine(
+                test_date,
+                time(hour=hour, minute=minute),
+            ).isoformat()
+
+        request_body = {
+            "requestId": "locked-test-001",
+            "userId": 1,
+            "weekStartDate": week_start.isoformat(),
+            "weekEndDate": week_end.isoformat(),
+            "timezone": "Asia/Seoul",
+            "replanFromTime": make_datetime(9),
+
+            "tasks": [
+                {
+                    "taskId": 1,
+                    "title": "발표 자료 조사",
+                    "estimatedMinutes": 60,
+                    "deadline": make_datetime(18),
+                    "priority": 1,
+                    "difficulty": 2,
+                    "focusRequired": 2,
+                }
+            ],
+
+            "fixedSchedules": [],
+
+            "existingSchedules": [
+                {
+                    "blockId": "generated:1:step-1",
+                    "taskId": "1",
+                    "title": "발표 자료 조사",
+                    "stepOrder": 1,
+                    "startTime": make_datetime(9),
+                    "endTime": make_datetime(10),
+                    "source": "GENERATED",
+                    "locked": True,
+                    "reason": "사용자가 고정한 일정",
+                }
+            ],
+        }
+
+        response = self.client.post(
+            "/ai/schedules/replan",
+            json=request_body,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+            msg=f"locked 일정 재배치 요청 실패: {response.text}",
+        )
+
+        data = response.json()
+
+  
+
+        self.assertTrue(
+            data.get("success"),
+            msg=f"재배치 응답이 실패함: {data}",
+        )
+
+        preserved_schedules = data.get(
+            "preservedSchedules",
+            [],
+        )
+
+        locked_schedule = None
+
+        for schedule in preserved_schedules:
+            if schedule.get("blockId") == "generated:1:step-1":
+                locked_schedule = schedule
+                break
+
+        self.assertIsNotNone(
+            locked_schedule,
+            msg=(
+                "locked 일정이 preservedSchedules에 없음: "
+                f"{preserved_schedules}"
+            ),
+        )
+
+        # 시작 시간이 그대로인지 확인
+        self.assertEqual(
+            locked_schedule.get("startTime"),
+            make_datetime(9),
+            msg=f"locked 일정 시작 시간이 변경됨: {locked_schedule}",
+        )
+
+        # 종료 시간이 그대로인지 확인
+        self.assertEqual(
+            locked_schedule.get("endTime"),
+            make_datetime(10),
+            msg=f"locked 일정 종료 시간이 변경됨: {locked_schedule}",
+        )
+
+        # locked 값이 계속 true인지 확인
+        self.assertTrue(
+            locked_schedule.get("locked"),
+            msg=f"locked 값이 유지되지 않음: {locked_schedule}",
+        )
+
+        # 최종 일정에도 존재하는지 확인
+        final_schedules = data.get("finalSchedules", [])
+
+        exists_in_final = any(
+            schedule.get("blockId") == "generated:1:step-1"
+            for schedule in final_schedules
+        )
+
+        self.assertTrue(
+            exists_in_final,
+            msg=f"locked 일정이 finalSchedules에 없음: {final_schedules}",
+        )
+
+        # locked 일정이 이동 또는 삭제 처리되지 않았는지 확인
+        changes = data.get("changes", [])
+
+        invalid_changes = [
+            change
+            for change in changes
+            if (
+                change.get("blockId") == "generated:1:step-1"
+                and change.get("action") in {"MOVED", "REMOVED"}
+            )
+        ]
+
+        self.assertEqual(
+            invalid_changes,
+            [],
+            msg=(
+                "locked 일정이 이동 또는 삭제 처리됨: "
+                f"{invalid_changes}"
+            ),
+        )
+
+
+
+
+    def test_completed_task_is_excluded(self):
+        """
+        completed=true인 작업이 재배치 결과에
+        다시 생성되지 않는지 테스트한다.
+        """
+
+        test_date = (datetime.now() + timedelta(days=1)).date()
+
+        week_start = test_date - timedelta(
+            days=test_date.weekday()
+        )
+        week_end = week_start + timedelta(days=6)
+
+        def make_datetime(hour: int, minute: int = 0) -> str:
+            return datetime.combine(
+                test_date,
+                time(hour=hour, minute=minute),
+            ).isoformat()
+
+        request_body = {
+            "requestId": "completed-test-001",
+            "userId": 1,
+            "weekStartDate": week_start.isoformat(),
+            "weekEndDate": week_end.isoformat(),
+            "timezone": "Asia/Seoul",
+            "replanFromTime": make_datetime(8),
+
+            # taskId=1은 완료한 작업
+            "completedTaskIds": [1],
+            "postponedTaskIds": [],
+            
+            "tasks": [
+                {
+                    "taskId": 1,
+                    "title": "완료한 발표 자료 조사",
+                    "estimatedMinutes": 60,
+                    "deadline": make_datetime(18),
+                    "priority": 1,
+                    "difficulty": 2,
+                    "focusRequired": 2,
+                },
+                {
+                    "taskId": 2,
+                    "title": "남은 발표 연습",
+                    "estimatedMinutes": 60,
+                    "deadline": make_datetime(19),
+                    "priority": 2,
+                    "difficulty": 2,
+                    "focusRequired": 2,
+                },
+            ],
+
+            "fixedSchedules": [],
+
+            "existingSchedules": [
+                {
+                    "blockId": "generated:1:step-1",
+                    "taskId": "1",
+                    "title": "완료한 발표 자료 조사",
+                    "stepOrder": 1,
+                    "startTime": make_datetime(9),
+                    "endTime": make_datetime(10),
+                    "source": "GENERATED",
+                    "locked": False,
+                    "completed": True,
+                    "reason": "사용자가 작업을 완료함",
+                }
+            ],
+        }
+
+        response = self.client.post(
+            "/ai/schedules/replan",
+            json=request_body,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+            msg=f"완료 작업 제외 요청 실패: {response.text}",
+        )
+
+        data = response.json()
+
+   
+
+        self.assertTrue(
+            data.get("success"),
+            msg=f"재배치 응답이 실패함: {data}",
+        )
+
+        schedules = data.get("schedules", [])
+
+        # 새로 생성된 일정의 taskId 목록
+        scheduled_task_ids = {
+            str(schedule.get("taskId"))
+            for schedule in schedules
+            if schedule.get("taskId") is not None
+        }
+
+        # 완료한 taskId=1은 다시 생성되면 안 됨
+        self.assertNotIn(
+            "1",
+            scheduled_task_ids,
+            msg=(
+                "완료한 taskId=1이 다시 일정에 배치됨: "
+                f"{schedules}"
+            ),
+        )
+
+        # 완료하지 않은 taskId=2는 생성돼야 함
+        self.assertIn(
+            "2",
+            scheduled_task_ids,
+            msg=(
+                "완료하지 않은 taskId=2가 배치되지 않음: "
+                f"{schedules}"
+            ),
+        )
+
+        preserved_schedules = data.get(
+            "preservedSchedules",
+            [],
+        )
+
+        preserved_task_ids = {
+            str(schedule.get("taskId"))
+            for schedule in preserved_schedules
+            if schedule.get("taskId") is not None
+        }
+
+        # 완료 일정이 preservedSchedules에 남지 않는지 확인
+        self.assertNotIn(
+            "1",
+            preserved_task_ids,
+            msg=(
+                "완료한 taskId=1이 preservedSchedules에 남아 있음: "
+                f"{preserved_schedules}"
+            ),
+        )
+
+
+
+    def test_postponed_task_with_urgent_schedule(self):
+        """
+        미룬 작업과 긴급 일정이 함께 전달됐을 때
+        기존 작업이 긴급 일정 이후로 재배치되는지 테스트한다.
+        """
+
+        test_date = (datetime.now() + timedelta(days=1)).date()
+
+        week_start = test_date - timedelta(
+            days=test_date.weekday()
+        )
+        week_end = week_start + timedelta(days=6)
+
+        def make_datetime(hour: int, minute: int = 0) -> str:
+            return datetime.combine(
+                test_date,
+                time(hour=hour, minute=minute),
+            ).isoformat()
+
+        request_body = {
+            "requestId": "postpone-urgent-test-001",
+            "userId": 1,
+            "weekStartDate": week_start.isoformat(),
+            "weekEndDate": week_end.isoformat(),
+            "timezone": "Asia/Seoul",
+            "replanFromTime": make_datetime(9),
+
+            # 완료 작업은 없음
+            "completedTaskIds": [],
+
+            # taskId=1을 미룬 작업으로 전달
+            "postponedTaskIds": [1],
+
+            "tasks": [
+                {
+                    "taskId": 1,
+                    "title": "미룬 발표 자료 조사",
+                    "estimatedMinutes": 60,
+                    "deadline": make_datetime(18),
+                    "priority": 1,
+                    "difficulty": 2,
+                    "focusRequired": 2,
+                }
+            ],
+
+            # 새로 추가된 긴급 일정
+            "fixedSchedules": [
+                {
+                    "fixedScheduleId": 3,
+                    "title": "긴급 병원 예약",
+                    "startTime": make_datetime(9),
+                    "endTime": make_datetime(11),
+                    "locked": True,
+                }
+            ],
+
+            # 재배치 전 기존 일정
+            "existingSchedules": [
+                {
+                    "blockId": "generated:1:step-1",
+                    "taskId": "1",
+                    "title": "미룬 발표 자료 조사",
+                    "stepOrder": 1,
+                    "startTime": make_datetime(9),
+                    "endTime": make_datetime(10),
+                    "source": "GENERATED",
+                    "locked": False,
+                    "completed": False,
+                    "reason": "기존 생성 일정",
+                }
+            ],
+        }
+
+        response = self.client.post(
+            "/ai/schedules/replan",
+            json=request_body,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+            msg=f"미루기·긴급 일정 요청 실패: {response.text}",
+        )
+
+        data = response.json()
+
+       
+
+        self.assertTrue(
+            data.get("success"),
+            msg=f"재배치 응답이 실패함: {data}",
+        )
+
+        schedules = data.get("schedules", [])
+
+        # taskId=1의 재배치 결과 찾기
+        postponed_task = None
+
+        for schedule in schedules:
+            if str(schedule.get("taskId")) == "1":
+                postponed_task = schedule
+                break
+
+        self.assertIsNotNone(
+            postponed_task,
+            msg=f"미룬 taskId=1이 재배치되지 않음: {schedules}",
+        )
+
+        postponed_start = datetime.fromisoformat(
+            postponed_task["startTime"]
+        )
+        postponed_end = datetime.fromisoformat(
+            postponed_task["endTime"]
+        )
+
+        urgent_start = datetime.fromisoformat(
+            make_datetime(9)
+        )
+        urgent_end = datetime.fromisoformat(
+            make_datetime(11)
+        )
+
+        # 긴급 일정과 시간이 겹치지 않는지 확인
+        overlaps = (
+            postponed_start < urgent_end
+            and postponed_end > urgent_start
+        )
+
+        self.assertFalse(
+            overlaps,
+            msg=(
+                "미룬 작업이 긴급 일정과 겹침: "
+                f"{postponed_task}"
+            ),
+        )
+
+        # 긴급 일정 종료 후에 배치됐는지 확인
+        self.assertGreaterEqual(
+            postponed_start,
+            urgent_end,
+            msg=(
+                "미룬 작업이 긴급 일정 이후로 이동하지 않음: "
+                f"{postponed_task}"
+            ),
+        )
+
+        # 미루기 점수가 반영됐는지 확인
+        scores = data.get("scores", {})
+        task_score = scores.get("1", {})
+
+        self.assertGreater(
+            task_score.get("postponement", 0),
+            0,
+            msg=f"미루기 점수가 반영되지 않음: {scores}",
+        )
+
+        # 기존 일정이 MOVED로 기록됐는지 확인
+        changes = data.get("changes", [])
+
+        moved_exists = any(
+            str(change.get("taskId")) == "1"
+            and change.get("action") == "MOVED"
+            for change in changes
+        )
+
+        self.assertTrue(
+            moved_exists,
+            msg=f"taskId=1의 MOVED 기록이 없음: {changes}",
+        )
+
+        # 긴급 일정이 preservedSchedules에 유지되는지 확인
+        preserved_schedules = data.get(
+            "preservedSchedules",
+            [],
+        )
+
+        urgent_preserved = any(
+            schedule.get("blockId") == "fixed:3"
+            and schedule.get("locked") is True
+            for schedule in preserved_schedules
+        )
+
+        self.assertTrue(
+            urgent_preserved,
+            msg=(
+                "긴급 일정이 preservedSchedules에 유지되지 않음: "
+                f"{preserved_schedules}"
+            ),
+        )
+
+
+
+
+
+
+
+    def test_insufficient_time_returns_unscheduled_task(self):
+        """
+        마감 전 가용 시간이 작업 필요 시간보다 부족하면
+        작업이 unscheduledTasks에 포함되는지 테스트한다.
+        """
+
+        test_date = (datetime.now() + timedelta(days=1)).date()
+
+        week_start = test_date - timedelta(
+            days=test_date.weekday()
+        )
+        week_end = week_start + timedelta(days=6)
+
+        def make_datetime(hour: int, minute: int = 0) -> str:
+            return datetime.combine(
+                test_date,
+                time(hour=hour, minute=minute),
+            ).isoformat()
+
+        request_body = {
+            "requestId": "insufficient-time-test-001",
+            "userId": 1,
+            "weekStartDate": week_start.isoformat(),
+            "weekEndDate": week_end.isoformat(),
+            "timezone": "Asia/Seoul",
+
+            "tasks": [
+                {
+                    "taskId": 3,
+                    "title": "발표 연습",
+
+                    # 가용 시간보다 확실히 큰 값으로 설정
+                    "estimatedMinutes": 1200,
+
+                    "deadline": make_datetime(18),
+                    "priority": 1,
+                    "difficulty": 3,
+                    "focusRequired": 3,
+                }
+            ],
+
+            "fixedSchedules": [
+                {
+                    "fixedScheduleId": 4,
+                    "title": "종일 수업",
+                    "startTime": make_datetime(0),
+                    "endTime": make_datetime(17),
+                    "locked": True,
+                }
+            ],
+
+            "existingSchedules": [],
+        }
+
+        response = self.client.post(
+            "/schedules/generate",
+            json=request_body,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+            msg=f"가용 시간 부족 테스트 요청 실패: {response.text}",
+        )
+
+        data = response.json()
+
+      
+
+        self.assertTrue(
+            data.get("success"),
+            msg=f"API 응답이 실패함: {data}",
+        )
+
+        schedules = data.get("schedules", [])
+
+        scheduled_task_ids = {
+            str(schedule.get("taskId"))
+            for schedule in schedules
+            if schedule.get("taskId") is not None
+        }
+
+        # 시간 부족 작업은 정상 일정에 생성되면 안 됨
+        self.assertNotIn(
+            "3",
+            scheduled_task_ids,
+            msg=(
+                "시간이 부족한 taskId=3이 일정에 생성됨: "
+                f"{schedules}"
+            ),
+        )
+
+        unscheduled_tasks = data.get(
+            "unscheduledTasks",
+            [],
+        )
+
+        unscheduled_task = None
+
+        for task in unscheduled_tasks:
+            if str(task.get("taskId")) == "3":
+                unscheduled_task = task
+                break
+
+        self.assertIsNotNone(
+            unscheduled_task,
+            msg=(
+                "시간이 부족한 taskId=3이 "
+                f"unscheduledTasks에 없음: {unscheduled_tasks}"
+            ),
+        )
+
+        # 제목 확인
+        self.assertEqual(
+            unscheduled_task.get("title"),
+            "발표 연습",
+            msg=f"작업 제목이 올바르지 않음: {unscheduled_task}",
+        )
+
+        # 필요한 시간이 요청값으로 보완됐는지 확인
+        self.assertEqual(
+            unscheduled_task.get("requiredMinutes"),
+            1200,
+            msg=f"필요 시간이 올바르지 않음: {unscheduled_task}",
+        )
+
+        # 실패 사유 확인
+        self.assertEqual(
+            unscheduled_task.get("reasonCode"),
+            "INSUFFICIENT_TIME",
+            msg=f"reasonCode가 올바르지 않음: {unscheduled_task}",
+        )
+
+        required_minutes = unscheduled_task.get(
+            "requiredMinutes",
+            0,
+        )
+        available_minutes = unscheduled_task.get(
+            "availableMinutes",
+            0,
+        )
+
+        # 가용 시간이 필요 시간보다 작아야 함
+        self.assertLess(
+            available_minutes,
+            required_minutes,
+            msg=(
+                "가용 시간이 필요 시간보다 적지 않음: "
+                f"{unscheduled_task}"
+            ),
+        )
+
+        warnings = data.get("warnings", [])
+
+        insufficient_warning_exists = any(
+            (
+                str(
+                    warning.get(
+                        "taskId",
+                        warning.get("task_id"),
+                    )
+                ) == "3"
+                and warning.get("code")
+                == "UNSCHEDULABLE_TASK"
+            )
+            for warning in warnings
+        )
+
+        self.assertTrue(
+            insufficient_warning_exists,
+            msg=f"가용 시간 부족 경고가 없음: {warnings}",
+        )
+
+
+    def test_deadline_passed_returns_unscheduled_task(self):
+        """
+        마감 시간이 이미 지난 작업이 schedules에 생성되지 않고
+        unscheduledTasks에 DEADLINE_PASSED로 포함되는지 테스트한다.
+        """
+
+        # 현재 시각보다 2시간 전을 마감 시간으로 설정
+        past_deadline = datetime.now() - timedelta(hours=2)
+        test_date = past_deadline.date()
+
+        week_start = test_date - timedelta(
+            days=test_date.weekday()
+        )
+        week_end = week_start + timedelta(days=6)
+
+        request_body = {
+            "requestId": "deadline-passed-test-001",
+            "userId": 1,
+            "weekStartDate": week_start.isoformat(),
+            "weekEndDate": week_end.isoformat(),
+            "timezone": "Asia/Seoul",
+
+            "tasks": [
+                {
+                    "taskId": 4,
+                    "title": "지난 보고서 제출",
+                    "estimatedMinutes": 60,
+                    "deadline": past_deadline.isoformat(
+                        timespec="seconds"
+                    ),
+                    "priority": 1,
+                    "difficulty": 2,
+                    "focusRequired": 2,
+                }
+            ],
+
+            "fixedSchedules": [],
+            "existingSchedules": [],
+        }
+
+        response = self.client.post(
+            "/schedules/generate",
+            json=request_body,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+            msg=f"마감 경과 테스트 요청 실패: {response.text}",
+        )
+
+        data = response.json()
+
+      
+
+        self.assertTrue(
+            data.get("success"),
+            msg=f"API 응답이 실패함: {data}",
+        )
+
+        schedules = data.get("schedules", [])
+
+        # taskId=4가 정상 일정에 생성되지 않아야 함
+        scheduled_task_ids = {
+            str(schedule.get("taskId"))
+            for schedule in schedules
+            if schedule.get("taskId") is not None
+        }
+
+        self.assertNotIn(
+            "4",
+            scheduled_task_ids,
+            msg=(
+                "마감이 지난 taskId=4가 일정에 생성됨: "
+                f"{schedules}"
+            ),
+        )
+
+        unscheduled_tasks = data.get(
+            "unscheduledTasks",
+            [],
+        )
+
+        # unscheduledTasks에서 taskId=4 찾기
+        unscheduled_task = None
+
+        for task in unscheduled_tasks:
+            if str(task.get("taskId")) == "4":
+                unscheduled_task = task
+                break
+
+        self.assertIsNotNone(
+            unscheduled_task,
+            msg=(
+                "마감이 지난 taskId=4가 "
+                f"unscheduledTasks에 없음: {unscheduled_tasks}"
+            ),
+        )
+
+        # 제목이 요청 작업에서 보완됐는지 확인
+        self.assertEqual(
+            unscheduled_task.get("title"),
+            "지난 보고서 제출",
+            msg=f"작업 제목이 올바르지 않음: {unscheduled_task}",
+        )
+
+        # 필요한 시간이 요청값 60분인지 확인
+        self.assertEqual(
+            unscheduled_task.get("requiredMinutes"),
+            60,
+            msg=f"필요 시간이 올바르지 않음: {unscheduled_task}",
+        )
+
+        # 가용 시간은 0분이어야 함
+        self.assertEqual(
+            unscheduled_task.get("availableMinutes"),
+            0,
+            msg=f"가용 시간이 올바르지 않음: {unscheduled_task}",
+        )
+
+        # 실패 사유가 마감 경과인지 확인
+        self.assertEqual(
+            unscheduled_task.get("reasonCode"),
+            "DEADLINE_PASSED",
+            msg=f"reasonCode가 올바르지 않음: {unscheduled_task}",
+        )
+
+        warnings = data.get("warnings", [])
+
+        # 원본 경고 코드 확인
+        deadline_warning = None
+
+        for warning in warnings:
+            warning_task_id = warning.get(
+                "taskId",
+                warning.get("task_id"),
+            )
+
+            if (
+                str(warning_task_id) == "4"
+                and warning.get("code")
+                == "DEADLINE_ALREADY_PASSED"
+            ):
+                deadline_warning = warning
+                break
+
+        self.assertIsNotNone(
+            deadline_warning,
+            msg=(
+                "DEADLINE_ALREADY_PASSED 경고가 없음: "
+                f"{warnings}"
+            ),
+        )
+
+        # 경고 상세 정보에 실제 마감 시간이 있는지 확인
+        warning_details = deadline_warning.get(
+            "details",
+            {},
+        )
+
+        self.assertIn(
+            "effective_deadline",
+            warning_details,
+            msg=(
+                "경고 details에 effective_deadline이 없음: "
+                f"{deadline_warning}"
+            ),
+        )
+
+
+
+
+    def test_new_task_creates_created_change(self):
+        """
+        기존 일정에 없던 새 작업이 재배치되면
+        changes에 CREATED가 기록되는지 테스트한다.
+        """
+
+        test_date = (datetime.now() + timedelta(days=1)).date()
+
+        week_start = test_date - timedelta(
+            days=test_date.weekday()
+        )
+        week_end = week_start + timedelta(days=6)
+
+        def make_datetime(hour: int, minute: int = 0) -> str:
+            return datetime.combine(
+                test_date,
+                time(hour=hour, minute=minute),
+            ).isoformat()
+
+        request_body = {
+            "requestId": "created-change-test-001",
+            "userId": 1,
+            "weekStartDate": week_start.isoformat(),
+            "weekEndDate": week_end.isoformat(),
+            "timezone": "Asia/Seoul",
+            "replanFromTime": make_datetime(8),
+
+            "completedTaskIds": [],
+            "postponedTaskIds": [],
+
+            "tasks": [
+                {
+                    "taskId": 5,
+                    "title": "새로 추가된 보고서 작성",
+                    "estimatedMinutes": 60,
+                    "deadline": make_datetime(18),
+                    "priority": 2,
+                    "difficulty": 2,
+                    "focusRequired": 2,
+                }
+            ],
+
+            "fixedSchedules": [],
+
+            # 기존 일정에는 taskId=5가 없음
+            "existingSchedules": [],
+        }
+
+        response = self.client.post(
+            "/ai/schedules/replan",
+            json=request_body,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+            msg=f"CREATED 테스트 요청 실패: {response.text}",
+        )
+
+        data = response.json()
+
+    
+
+        self.assertTrue(
+            data.get("success"),
+            msg=f"재배치 응답이 실패함: {data}",
+        )
+
+        schedules = data.get("schedules", [])
+
+        # 새 작업이 실제 일정에 생성됐는지 확인
+        created_schedule = None
+
+        for schedule in schedules:
+            if str(schedule.get("taskId")) == "5":
+                created_schedule = schedule
+                break
+
+        self.assertIsNotNone(
+            created_schedule,
+            msg=f"새 taskId=5 일정이 생성되지 않음: {schedules}",
+        )
+
+        changes = data.get("changes", [])
+
+        # taskId=5의 CREATED 변경 기록 찾기
+        created_change = None
+
+        for change in changes:
+            if (
+                str(change.get("taskId")) == "5"
+                and change.get("action") == "CREATED"
+            ):
+                created_change = change
+                break
+
+        self.assertIsNotNone(
+            created_change,
+            msg=f"taskId=5의 CREATED 기록이 없음: {changes}",
+        )
+
+        # 새로 생성된 일정이므로 변경 전 시간은 없어야 함
+        self.assertIsNone(
+            created_change.get("beforeStartTime"),
+            msg=f"CREATED의 beforeStartTime이 비어 있지 않음: {created_change}",
+        )
+
+        self.assertIsNone(
+            created_change.get("beforeEndTime"),
+            msg=f"CREATED의 beforeEndTime이 비어 있지 않음: {created_change}",
+        )
+
+        # 생성된 이후 시간은 존재해야 함
+        self.assertIsNotNone(
+            created_change.get("afterStartTime"),
+            msg=f"CREATED의 afterStartTime이 없음: {created_change}",
+        )
+
+        self.assertIsNotNone(
+            created_change.get("afterEndTime"),
+            msg=f"CREATED의 afterEndTime이 없음: {created_change}",
+        )
+
+        # 생성된 일정의 시간과 changes의 시간이 같은지 확인
+        self.assertEqual(
+            created_change.get("afterStartTime"),
+            created_schedule.get("startTime"),
+            msg="CREATED 기록과 실제 일정의 시작 시간이 다름",
+        )
+
+        self.assertEqual(
+            created_change.get("afterEndTime"),
+            created_schedule.get("endTime"),
+            msg="CREATED 기록과 실제 일정의 종료 시간이 다름",
+        )
+
+        # sequence가 존재하고 1 이상인지 확인
+        self.assertIsInstance(
+            created_change.get("sequence"),
+            int,
+            msg=f"CREATED의 sequence가 정수가 아님: {created_change}",
+        )
+
+        self.assertGreaterEqual(
+            created_change.get("sequence"),
+            1,
+            msg=f"CREATED의 sequence가 1보다 작음: {created_change}",
+        )
+
+
+
+
+    def test_long_task_creates_split_change(self):
+        """
+        180분짜리 새 작업이 여러 일정 블록으로 나뉘고,
+        changes에 CREATED와 SPLIT이 기록되는지 테스트한다.
+        """
+
+        test_date = (
+            datetime.now() + timedelta(days=1)
+        ).date()
+
+        week_start = test_date - timedelta(
+            days=test_date.weekday()
+        )
+        week_end = week_start + timedelta(days=6)
+
+        def make_datetime(
+            hour: int,
+            minute: int = 0,
+        ) -> str:
+            return datetime.combine(
+                test_date,
+                time(hour=hour, minute=minute),
+            ).isoformat()
+
+        request_body = {
+            "requestId": "split-change-test-001",
+            "userId": 1,
+            "weekStartDate": week_start.isoformat(),
+            "weekEndDate": week_end.isoformat(),
+            "timezone": "Asia/Seoul",
+            "replanFromTime": make_datetime(9),
+
+            "completedTaskIds": [],
+            "postponedTaskIds": [],
+
+            "tasks": [
+                {
+                    "taskId": 6,
+                    "title": "긴 발표 자료 작성",
+                    "estimatedMinutes": 180,
+                    "deadline": make_datetime(20),
+                    "priority": 2,
+                    "difficulty": 3,
+                    "focusRequired": 3,
+                }
+            ],
+
+            "fixedSchedules": [],
+            "existingSchedules": [],
+        }
+
+        response = self.client.post(
+            "/ai/schedules/replan",
+            json=request_body,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+            msg=f"SPLIT 테스트 요청 실패: {response.text}",
+        )
+
+        data = response.json()
+
+     
+
+        self.assertTrue(
+            data.get("success"),
+            msg=f"재배치 응답이 실패함: {data}",
+        )
+
+        schedules = data.get("schedules", [])
+
+        # taskId=6에 해당하는 일정 블록만 찾기
+        task_blocks = [
+            schedule
+            for schedule in schedules
+            if str(schedule.get("taskId")) == "6"
+        ]
+
+        # 긴 작업이 2개 이상의 블록으로 분할돼야 함
+        self.assertGreaterEqual(
+            len(task_blocks),
+            2,
+            msg=(
+                "180분 작업이 여러 블록으로 "
+                f"분할되지 않음: {task_blocks}"
+            ),
+        )
+
+        # blockId가 서로 달라야 함
+        block_ids = [
+            block.get("blockId")
+            for block in task_blocks
+        ]
+
+        self.assertEqual(
+            len(block_ids),
+            len(set(block_ids)),
+            msg=f"분할 블록의 blockId가 중복됨: {block_ids}",
+        )
+
+        # 분할된 모든 블록의 시간 합이 180분인지 확인
+        total_minutes = 0
+
+        for block in task_blocks:
+            start_time = datetime.fromisoformat(
+                block["startTime"]
+            )
+            end_time = datetime.fromisoformat(
+                block["endTime"]
+            )
+
+            total_minutes += int(
+                (
+                    end_time - start_time
+                ).total_seconds()
+                / 60
+            )
+
+        self.assertEqual(
+            total_minutes,
+            180,
+            msg=(
+                "분할 블록의 전체 시간 합이 "
+                f"180분이 아님: {total_minutes}분"
+            ),
+        )
+
+        changes = data.get("changes", [])
+
+        task_changes = [
+            change
+            for change in changes
+            if str(change.get("taskId")) == "6"
+        ]
+
+        # 첫 번째 블록은 CREATED
+        created_exists = any(
+            change.get("action") == "CREATED"
+            for change in task_changes
+        )
+
+        self.assertTrue(
+            created_exists,
+            msg=f"분할 작업의 CREATED 기록이 없음: {task_changes}",
+        )
+
+        # 두 번째 이후 블록에는 SPLIT이 있어야 함
+        split_changes = [
+            change
+            for change in task_changes
+            if change.get("action") == "SPLIT"
+        ]
+
+        self.assertGreaterEqual(
+            len(split_changes),
+            1,
+            msg=f"SPLIT 변경 기록이 없음: {task_changes}",
+        )
+
+        for split_change in split_changes:
+            self.assertIsNone(
+                split_change.get("beforeStartTime"),
+                msg=(
+                    "새 분할 블록의 beforeStartTime이 "
+                    f"비어 있지 않음: {split_change}"
+                ),
+            )
+
+            self.assertIsNotNone(
+                split_change.get("afterStartTime"),
+                msg=(
+                    "SPLIT의 afterStartTime이 없음: "
+                    f"{split_change}"
+                ),
+            )
+
+            self.assertIsNotNone(
+                split_change.get("afterEndTime"),
+                msg=(
+                    "SPLIT의 afterEndTime이 없음: "
+                    f"{split_change}"
+                ),
+            )
+
+            self.assertEqual(
+                split_change.get("reasonCode"),
+                "TASK_SPLIT",
+                msg=(
+                    "SPLIT reasonCode가 올바르지 않음: "
+                    f"{split_change}"
+                ),
+            )
+
+        summary = data.get("summary", {})
+
+        self.assertGreaterEqual(
+            summary.get("splitCount", 0),
+            1,
+            msg=f"summary의 splitCount가 올바르지 않음: {summary}",
+        )
+
+
+
+    def test_change_sequence_is_sorted(self):
+        """
+        changes가 시간순으로 정렬되고
+        sequence가 1부터 연속으로 부여되는지 테스트한다.
+        """
+
+        before_schedules = [
+            {
+                "blockId": "generated:2:step-1",
+                "taskId": "2",
+                "title": "완료한 작업",
+                "startTime": "2026-08-10T09:00:00",
+                "endTime": "2026-08-10T10:00:00",
+                "source": "GENERATED",
+                "locked": False,
+            },
+            {
+                "blockId": "generated:1:step-1",
+                "taskId": "1",
+                "title": "이동할 작업",
+                "startTime": "2026-08-10T10:00:00",
+                "endTime": "2026-08-10T11:00:00",
+                "source": "GENERATED",
+                "locked": False,
+            },
+        ]
+
+        after_schedules = [
+            {
+                "blockId": "generated:1:step-1",
+                "taskId": "1",
+                "title": "이동할 작업",
+                "startTime": "2026-08-10T12:00:00",
+                "endTime": "2026-08-10T13:00:00",
+                "source": "GENERATED",
+                "locked": False,
+            },
+            {
+                "blockId": "generated:3:step-1",
+                "taskId": "3",
+                "title": "새로 생성된 작업",
+                "startTime": "2026-08-10T11:00:00",
+                "endTime": "2026-08-10T12:00:00",
+                "source": "GENERATED",
+                "locked": False,
+            },
+        ]
+
+        changes = _build_schedule_changes(
+            before_schedules=before_schedules,
+            after_schedules=after_schedules,
+            completed_task_ids=[2],
+        )
+
+        # sequence가 1, 2, 3 순서인지 확인
+        sequences = [
+            change.get("sequence")
+            for change in changes
+        ]
+
+        self.assertEqual(
+            sequences,
+            [1, 2, 3],
+            msg=f"sequence가 연속적이지 않음: {changes}",
+        )
+
+        # 같은 sequence가 중복되지 않는지 확인
+        self.assertEqual(
+            len(sequences),
+            len(set(sequences)),
+            msg=f"sequence가 중복됨: {changes}",
+        )
+
+        # 시간순 결과:
+        # 09:00 REMOVED → 11:00 CREATED → 12:00 MOVED
+        actions = [
+            change.get("action")
+            for change in changes
+        ]
+
+        self.assertEqual(
+            actions,
+            [
+                "REMOVED",
+                "CREATED",
+                "MOVED",
+            ],
+            msg=f"changes가 시간순으로 정렬되지 않음: {changes}",
+        )
+
+        sort_times = [
+            (
+                change.get("afterStartTime")
+                or change.get("beforeStartTime")
+            )
+            for change in changes
+        ]
+
+        self.assertEqual(
+            sort_times,
+            sorted(sort_times),
+            msg=f"변경 시간이 오름차순이 아님: {changes}",
+        )
+
+
+
+    def test_string_task_id_is_supported(self):
+        """
+        숫자가 아닌 문자열 taskId도 generate와 replan API에서
+        정상적으로 처리되는지 테스트한다.
+        """
+
+        test_date = (
+            datetime.now() + timedelta(days=1)
+        ).date()
+
+        week_start = test_date - timedelta(
+            days=test_date.weekday()
+        )
+        week_end = week_start + timedelta(days=6)
+
+        def make_datetime(
+            hour: int,
+            minute: int = 0,
+        ) -> str:
+            return datetime.combine(
+                test_date,
+                time(
+                    hour=hour,
+                    minute=minute,
+                ),
+            ).isoformat()
+
+        string_task_id = "task-101"
+
+        # 1. 문자열 taskId로 최초 일정 생성
+        generate_body = {
+            "requestId": "string-task-id-generate-001",
+            "userId": 1,
+            "weekStartDate": week_start.isoformat(),
+            "weekEndDate": week_end.isoformat(),
+            "timezone": "Asia/Seoul",
+
+            "tasks": [
+                {
+                    "taskId": string_task_id,
+                    "title": "문자열 ID 작업",
+                    "estimatedMinutes": 60,
+                    "deadline": make_datetime(18),
+                    "priority": 2,
+                    "difficulty": 2,
+                    "focusRequired": 2,
+                }
+            ],
+
+            "fixedSchedules": [],
+            "existingSchedules": [],
+        }
+
+        generate_response = self.client.post(
+            "/schedules/generate",
+            json=generate_body,
+        )
+
+        self.assertEqual(
+            generate_response.status_code,
+            200,
+            msg=(
+                "문자열 taskId generate 요청 실패: "
+                f"{generate_response.text}"
+            ),
+        )
+
+        generate_data = generate_response.json()
+
+        self.assertTrue(
+            generate_data.get("success"),
+            msg=f"generate 응답 실패: {generate_data}",
+        )
+
+        generated_schedule = None
+
+        for schedule in generate_data.get(
+            "schedules",
+            [],
+        ):
+            if (
+                str(schedule.get("taskId"))
+                == string_task_id
+            ):
+                generated_schedule = schedule
+                break
+
+        self.assertIsNotNone(
+            generated_schedule,
+            msg=(
+                "문자열 taskId 일정이 생성되지 않음: "
+                f"{generate_data}"
+            ),
+        )
+
+        self.assertTrue(
+            str(
+                generated_schedule.get(
+                    "blockId",
+                    "",
+                )
+            ).startswith(
+                f"generated:{string_task_id}:"
+            ),
+            msg=(
+                "문자열 taskId가 blockId에 "
+                f"정상 반영되지 않음: {generated_schedule}"
+            ),
+        )
+
+        # 2. 문자열 taskId를 완료 목록으로 전달
+        replan_body = {
+            "requestId": "string-task-id-replan-001",
+            "userId": 1,
+            "weekStartDate": week_start.isoformat(),
+            "weekEndDate": week_end.isoformat(),
+            "timezone": "Asia/Seoul",
+            "replanFromTime": make_datetime(8),
+
+            "completedTaskIds": [
+                string_task_id
+            ],
+            "postponedTaskIds": [],
+
+            "tasks": [
+                {
+                    "taskId": string_task_id,
+                    "title": "문자열 ID 작업",
+                    "estimatedMinutes": 60,
+                    "deadline": make_datetime(18),
+                    "priority": 2,
+                    "difficulty": 2,
+                    "focusRequired": 2,
+                }
+            ],
+
+            "fixedSchedules": [],
+
+            "existingSchedules": [
+                {
+                    **generated_schedule,
+                    "completed": False,
+                    "locked": False,
+                }
+            ],
+        }
+
+        replan_response = self.client.post(
+            "/ai/schedules/replan",
+            json=replan_body,
+        )
+
+        self.assertEqual(
+            replan_response.status_code,
+            200,
+            msg=(
+                "문자열 taskId replan 요청 실패: "
+                f"{replan_response.text}"
+            ),
+        )
+
+        replan_data = replan_response.json()
+
+        self.assertTrue(
+            replan_data.get("success"),
+            msg=f"replan 응답 실패: {replan_data}",
+        )
+
+        final_task_ids = {
+            str(schedule.get("taskId"))
+            for schedule in replan_data.get(
+                "finalSchedules",
+                [],
+            )
+            if schedule.get("taskId") is not None
+        }
+
+        # 완료된 문자열 ID 작업이 최종 일정에서 제외돼야 함
+        self.assertNotIn(
+            string_task_id,
+            final_task_ids,
+            msg=(
+                "완료한 문자열 taskId가 최종 일정에 남음: "
+                f"{replan_data}"
+            ),
+        )
+
+        removed_change = None
+
+        for change in replan_data.get(
+            "changes",
+            [],
+        ):
+            if (
+                str(change.get("taskId"))
+                == string_task_id
+                and change.get("action") == "REMOVED"
+            ):
+                removed_change = change
+                break
+
+        self.assertIsNotNone(
+            removed_change,
+            msg=(
+                "문자열 taskId의 REMOVED 기록이 없음: "
+                f"{replan_data.get('changes', [])}"
+            ),
+        )
+
+        self.assertEqual(
+            removed_change.get("reasonCode"),
+            "TASK_COMPLETED",
+            msg=(
+                "완료 문자열 taskId의 reasonCode가 "
+                f"올바르지 않음: {removed_change}"
+            ),
+        )
+
+
+
+    def test_duplicate_generate_request_id_returns_cached_result(
+        self,
+    ):
+        """
+        generate API에 동일한 requestId를 두 번 보내면
+        두 번째 요청이 기존 결과를 반환하는지 테스트한다.
+        """
+
+        test_date = (
+            datetime.now() + timedelta(days=1)
+        ).date()
+
+        week_start = test_date - timedelta(
+            days=test_date.weekday()
+        )
+        week_end = week_start + timedelta(days=6)
+
+        deadline = datetime.combine(
+            test_date,
+            time(hour=18),
+        ).isoformat()
+
+        request_body = {
+            "requestId": "duplicate-request-001",
+            "userId": 1,
+            "weekStartDate": week_start.isoformat(),
+            "weekEndDate": week_end.isoformat(),
+            "timezone": "Asia/Seoul",
+
+            "tasks": [
+                {
+                    "taskId": "duplicate-task-1",
+                    "title": "중복 요청 테스트 작업",
+                    "estimatedMinutes": 60,
+                    "deadline": deadline,
+                    "priority": 2,
+                    "difficulty": 2,
+                    "focusRequired": 2,
+                }
+            ],
+
+            "fixedSchedules": [],
+            "existingSchedules": [],
+        }
+
+        first_response = self.client.post(
+            "/schedules/generate",
+            json=request_body,
+        )
+
+        second_response = self.client.post(
+            "/schedules/generate",
+            json=request_body,
+        )
+
+        self.assertEqual(
+            first_response.status_code,
+            200,
+            msg=first_response.text,
+        )
+
+        self.assertEqual(
+            second_response.status_code,
+            200,
+            msg=second_response.text,
+        )
+
+        first_data = first_response.json()
+        second_data = second_response.json()
+
+        self.assertFalse(
+            first_data.get("duplicateRequest"),
+            msg=(
+                "첫 번째 요청이 중복 요청으로 처리됨: "
+                f"{first_data}"
+            ),
+        )
+
+        self.assertTrue(
+            second_data.get("duplicateRequest"),
+            msg=(
+                "두 번째 요청이 중복으로 처리되지 않음: "
+                f"{second_data}"
+            ),
+        )
+
+        first_result = dict(first_data)
+        second_result = dict(second_data)
+
+        first_result.pop(
+            "duplicateRequest",
+            None,
+        )
+        second_result.pop(
+            "duplicateRequest",
+            None,
+        )
+
+        self.assertEqual(
+            first_result,
+            second_result,
+            msg=(
+                "동일 requestId의 응답 결과가 달라짐:\n"
+                f"첫 번째: {first_data}\n"
+                f"두 번째: {second_data}"
+            ),
+        )
+
+
+
+
+    def test_duplicate_replan_request_id_returns_cached_result(
+        self,
+    ):
+        """
+        replan API에 동일한 requestId를 두 번 보내면
+        두 번째 요청이 기존 결과를 반환하는지 테스트한다.
+        """
+
+        test_date = (
+            datetime.now() + timedelta(days=1)
+        ).date()
+
+        week_start = test_date - timedelta(
+            days=test_date.weekday()
+        )
+        week_end = week_start + timedelta(days=6)
+
+        def make_datetime(
+            hour: int,
+            minute: int = 0,
+        ) -> str:
+            return datetime.combine(
+                test_date,
+                time(
+                    hour=hour,
+                    minute=minute,
+                ),
+            ).isoformat()
+
+        request_body = {
+            # generate 테스트와 같은 requestId를 사용해도
+            # 엔드포인트가 다르므로 충돌하면 안 됨
+            "requestId": "duplicate-request-001",
+            "userId": 1,
+            "weekStartDate": week_start.isoformat(),
+            "weekEndDate": week_end.isoformat(),
+            "timezone": "Asia/Seoul",
+            "replanFromTime": make_datetime(8),
+
+            "completedTaskIds": [],
+            "postponedTaskIds": [],
+
+            "tasks": [
+                {
+                    "taskId": "duplicate-task-2",
+                    "title": "중복 재배치 테스트",
+                    "estimatedMinutes": 60,
+                    "deadline": make_datetime(18),
+                    "priority": 2,
+                    "difficulty": 2,
+                    "focusRequired": 2,
+                }
+            ],
+
+            "fixedSchedules": [
+                {
+                    "fixedScheduleId": 100,
+                    "title": "긴급 일정",
+                    "startTime": make_datetime(9),
+                    "endTime": make_datetime(11),
+                }
+            ],
+
+            "existingSchedules": [
+                {
+                    "blockId": (
+                        "generated:"
+                        "duplicate-task-2:"
+                        "step-1"
+                    ),
+                    "taskId": "duplicate-task-2",
+                    "title": "중복 재배치 테스트",
+                    "stepOrder": 1,
+                    "startTime": make_datetime(9),
+                    "endTime": make_datetime(10),
+                    "source": "GENERATED",
+                    "locked": False,
+                    "completed": False,
+                }
+            ],
+        }
+
+        first_response = self.client.post(
+            "/ai/schedules/replan",
+            json=request_body,
+        )
+
+        second_response = self.client.post(
+            "/ai/schedules/replan",
+            json=request_body,
+        )
+
+        self.assertEqual(
+            first_response.status_code,
+            200,
+            msg=first_response.text,
+        )
+
+        self.assertEqual(
+            second_response.status_code,
+            200,
+            msg=second_response.text,
+        )
+
+        first_data = first_response.json()
+        second_data = second_response.json()
+
+        self.assertFalse(
+            first_data.get("duplicateRequest"),
+            msg=(
+                "첫 번째 재배치 요청이 "
+                f"중복으로 처리됨: {first_data}"
+            ),
+        )
+
+        self.assertTrue(
+            second_data.get("duplicateRequest"),
+            msg=(
+                "두 번째 재배치 요청이 "
+                f"중복으로 처리되지 않음: {second_data}"
+            ),
+        )
+
+        first_result = dict(first_data)
+        second_result = dict(second_data)
+
+        first_result.pop(
+            "duplicateRequest",
+            None,
+        )
+        second_result.pop(
+            "duplicateRequest",
+            None,
+        )
+
+        self.assertEqual(
+            first_result,
+            second_result,
+            msg=(
+                "동일 requestId 재배치 결과가 달라짐:\n"
+                f"첫 번째: {first_data}\n"
+                f"두 번째: {second_data}"
+            ),
+        )
+if __name__ == "__main__":
+    unittest.main()

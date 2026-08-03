@@ -1,5 +1,8 @@
+from copy import deepcopy
+from threading import Lock
+
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
@@ -16,13 +19,67 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# =========================================================
+# 동일 requestId 중복 요청 처리
+# =========================================================
+
+_request_cache: Dict[str, Dict[str, Any]] = {}
+_request_cache_lock = Lock()
+
+
+def _make_request_cache_key(
+    endpoint_name: str,
+    request_id: str,
+) -> str:
+    """
+    generate와 replan에서 같은 requestId를 사용해도
+    서로 충돌하지 않도록 엔드포인트 이름을 포함한다.
+    """
+
+    return f"{endpoint_name}:{request_id}"
+
+
+def _get_cached_response(
+    cache_key: str,
+) -> Optional[Dict[str, Any]]:
+    """
+    저장된 응답이 있으면 복사본을 반환한다.
+    """
+
+    with _request_cache_lock:
+        cached_response = _request_cache.get(
+            cache_key
+        )
+
+        if cached_response is None:
+            return None
+
+        return deepcopy(cached_response)
+
+
+def _store_cached_response(
+    cache_key: str,
+    response: Dict[str, Any],
+) -> None:
+    """
+    성공한 API 응답을 캐시에 저장한다.
+    """
+
+    with _request_cache_lock:
+        _request_cache[cache_key] = deepcopy(
+            response
+        )
+
+# taskId는 백엔드 협의 전까지
+# 숫자와 문자열을 모두 허용한다.
+TaskId = Union[int, str]
 
 # =========================================================
 # 요청 모델
 # =========================================================
 
 class TaskRequest(BaseModel):
-    taskId: int
+    taskId: TaskId
     title: str
     estimatedMinutes: int
     deadline: datetime
@@ -36,7 +93,7 @@ class TaskRequest(BaseModel):
     remainingMinutes: Optional[int] = None
     completed: bool = False
 
-    prerequisiteTaskIds: List[int] = Field(
+    prerequisiteTaskIds: List[TaskId] = Field(
         default_factory=list
     )
 
@@ -72,14 +129,13 @@ class GenerateScheduleRequest(BaseModel):
 class ReplanScheduleRequest(
         GenerateScheduleRequest
     ):
-        completedTaskIds: List[int] = Field(
+        completedTaskIds: List[TaskId] = Field(
             default_factory=list
         )
 
-        postponedTaskIds: List[int] = Field(
+        postponedTaskIds: List[TaskId] = Field(
             default_factory=list
         )
-
         replanFromTime: Optional[datetime] = None
 
 # =========================================================
@@ -466,7 +522,6 @@ def health_check() -> Dict[str, Any]:
         "message": "AI Scheduler API is running",
     }
 
-
 @app.post("/schedules/generate")
 @app.post("/ai/schedules/generate")
 def generate_schedule(
@@ -474,7 +529,23 @@ def generate_schedule(
 ) -> Any:
     """
     최초 자동 일정을 생성한다.
+
+    동일한 requestId가 다시 들어오면
+    기존 계산 결과를 반환한다.
     """
+
+    cache_key = _make_request_cache_key(
+        endpoint_name="generate",
+        request_id=request.requestId,
+    )
+
+    cached_response = _get_cached_response(
+        cache_key
+    )
+
+    if cached_response is not None:
+        cached_response["duplicateRequest"] = True
+        return cached_response
 
     try:
         internal_payload = (
@@ -485,7 +556,6 @@ def generate_schedule(
             internal_payload
         )
 
-        # 요청과 결과를 연결할 수 있도록 requestId 포함
         result["requestId"] = request.requestId
         result["userId"] = request.userId
         result["weekStartDate"] = (
@@ -496,14 +566,27 @@ def generate_schedule(
         )
         result["timezone"] = request.timezone
 
+        # 최초 처리된 요청
+        result["duplicateRequest"] = False
+
+        _store_cached_response(
+            cache_key=cache_key,
+            response=result,
+        )
+
         return result
 
-    except (KeyError, TypeError, ValueError) as error:
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+    ) as error:
         return JSONResponse(
             status_code=400,
             content={
                 "success": False,
                 "requestId": request.requestId,
+                "duplicateRequest": False,
                 "message": (
                     "일정 생성 요청값이 "
                     "올바르지 않습니다."
@@ -523,6 +606,7 @@ def generate_schedule(
             content={
                 "success": False,
                 "requestId": request.requestId,
+                "duplicateRequest": False,
                 "message": (
                     "AI 일정 생성 중 "
                     "오류가 발생했습니다."
@@ -534,7 +618,6 @@ def generate_schedule(
                 "unscheduledTasks": [],
                 "changes": [],
             },
-
         )
 
 @app.post("/ai/schedules/replan")
@@ -544,7 +627,23 @@ def replan_schedule(
     """
     완료, 미루기, 긴급 일정, locked 상태를
     반영하여 남은 일정을 재배치한다.
+
+    동일한 requestId가 다시 들어오면
+    기존 계산 결과를 반환한다.
     """
+
+    cache_key = _make_request_cache_key(
+        endpoint_name="replan",
+        request_id=request.requestId,
+    )
+
+    cached_response = _get_cached_response(
+        cache_key
+    )
+
+    if cached_response is not None:
+        cached_response["duplicateRequest"] = True
+        return cached_response
 
     try:
         internal_payload = (
@@ -573,6 +672,14 @@ def replan_schedule(
         )
         result["timezone"] = request.timezone
 
+        # 최초 처리된 요청
+        result["duplicateRequest"] = False
+
+        _store_cached_response(
+            cache_key=cache_key,
+            response=result,
+        )
+
         return result
 
     except (
@@ -585,6 +692,7 @@ def replan_schedule(
             content={
                 "success": False,
                 "requestId": request.requestId,
+                "duplicateRequest": False,
                 "message": (
                     "일정 재배치 요청값이 "
                     "올바르지 않습니다."
@@ -605,6 +713,7 @@ def replan_schedule(
             content={
                 "success": False,
                 "requestId": request.requestId,
+                "duplicateRequest": False,
                 "message": (
                     "AI 일정 재배치 중 "
                     "오류가 발생했습니다."
