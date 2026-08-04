@@ -6,9 +6,15 @@ import lombok.Getter;
 @Getter
 @Builder
 public class GeneratedScheduleDto {
-    private String taskTitle;
+    private String blockId;
+    private Long taskId;
+    private String title;
+    private Integer stepOrder;
     private String startTime;
     private String endTime;
-    private String title;
-    private Boolean isPinned;  // 고정 유무
+    private String source;
+    private boolean locked;
+    private boolean completed;
+    private String reasonCode;
+    private String reason;
 }

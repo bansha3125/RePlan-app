@@ -21,4 +21,22 @@ public class Task {
     private int estimatedMinutes;
     private boolean useAiDecomposition;
     private int desiredSteps;
+
+    @Builder.Default
+    private Integer priority = 1;
+
+    @Builder.Default
+    private Integer difficulty = 3;
+
+    @Builder.Default
+    private Integer focusRequired = 3;
+
+    @Builder.Default
+    private Integer postponeCount = 0;
+
+    @Builder.Default
+    private Integer completedMinutes = 0;
+
+    @Builder.Default
+    private boolean completed = false;
 }

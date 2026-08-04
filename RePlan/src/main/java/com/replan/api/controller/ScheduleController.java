@@ -50,8 +50,26 @@ public class ScheduleController {
     }
 
     @PostMapping("/generate")
-    public String generateAiSchedule(@RequestParam Long userId) {
+    public String generateAiSchedule(@RequestBody java.util.Map<String, Object> requestBody) {
+        Long userId = Long.valueOf(requestBody.get("userId").toString());
         scheduleService.generateAiSchedule(userId);
         return "AI 스케줄 생성 및 DB 저장 요청 완료!";
+    }
+
+    @PostMapping("/replan")
+    public String replanAiSchedule(@RequestBody java.util.Map<String, Object> requestBody) {
+        Long userId = Long.valueOf(requestBody.get("userId").toString());
+        String replanFromTime = (String) requestBody.get("replanFromTime");
+
+        @SuppressWarnings("unchecked")
+        List<Long> completedTaskIds = requestBody.get("completedTaskIds") != null ?
+                ((List<?>) requestBody.get("completedTaskIds")).stream().map(obj -> Long.valueOf(obj.toString())).toList() : List.of();
+
+        @SuppressWarnings("unchecked")
+        List<Long> postponedTaskIds = requestBody.get("postponedTaskIds") != null ?
+                ((List<?>) requestBody.get("postponedTaskIds")).stream().map(obj -> Long.valueOf(obj.toString())).toList() : List.of();
+
+        scheduleService.replanAiSchedule(userId, replanFromTime, completedTaskIds, postponedTaskIds);
+        return "AI 일정 재배치 및 DB 반영 요청 완료!";
     }
 }
