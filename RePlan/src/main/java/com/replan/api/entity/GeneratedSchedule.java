@@ -27,4 +27,20 @@ public class GeneratedSchedule {
 
     @Builder.Default
     private Boolean isPinned = false;
+
+    private String blockId;
+
+    private Integer stepOrder;
+
+    private String source;
+
+    @Builder.Default
+    private Boolean locked = false;
+
+    @Builder.Default
+    private Boolean completed = false;
+
+    private String reasonCode;
+
+    private String reason;
 }

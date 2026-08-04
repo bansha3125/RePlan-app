@@ -7,4 +7,5 @@ import java.util.List;
 
 public interface GeneratedScheduleRepository extends JpaRepository<GeneratedSchedule, Long> {
     List<GeneratedSchedule> findByUserId(Long userId);
+    void deleteByUserId(Long userId);
 }
