@@ -23,7 +23,10 @@ public class ScheduleController {
     private final FixedScheduleRepository fixedRepository;
 
     @GetMapping("/weekly")
-    public WeeklyScheduleResponse getWeeklySchedule(@RequestParam Long userId) {
+    public WeeklyScheduleResponse getWeeklySchedule(
+            @RequestParam Long userId,
+            @RequestParam(required = false) String weekStartDate
+    ) {
         return scheduleService.getWeeklySchedules(userId);
     }
 
