@@ -9,3 +9,14 @@
 
 # Local environment
 .env
+
+# Android / Gradle generated files
+.gradle/
+**/.gradle/
+**/build/
+**/.cxx/
+**/.externalNativeBuild/
+
+local.properties
+*.iml
+captures/
