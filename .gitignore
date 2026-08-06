@@ -10,16 +10,20 @@
 # Local environment
 .env
 
-# Android / Gradle generated files
+# Android & Gradle generated files
 .gradle/
 **/.gradle/
 **/build/
 **/.cxx/
 **/.externalNativeBuild/
 
+# Local properties & Android Studio Output
 local.properties
-*.iml
+**/local.properties
 captures/
+*.apk
+*.aar
+*.dex
 
 # Local database lock files
 *.lock.db
