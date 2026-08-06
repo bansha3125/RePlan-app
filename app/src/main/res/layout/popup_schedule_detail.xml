@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.cardview.widget.CardView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="300dp"
+    android:layout_height="wrap_content"
+    android:layout_gravity="center"
+    app:cardCornerRadius="20dp"
+    app:cardElevation="8dp"
+    app:cardBackgroundColor="#FFFFFF">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <!-- 팝업 헤더 타이틀 -->
+        <TextView
+            android:id="@+id/tvPopupTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="📌 일정 세부 정보"
+            android:textColor="#283593"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="16dp"/>
+
+        <!-- 구분선 -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#E0E0E0"
+            android:layout_marginBottom="16dp"/>
+
+        <!-- 일정 이름 표시 정보 영역 -->
+        <TextView
+            android:id="@+id/tvPopupName"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="일정명: 데이터구조"
+            android:textColor="#333333"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp"/>
+
+        <!-- 요일 및 시간 정보 영역 -->
+        <TextView
+            android:id="@+id/tvPopupTime"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="시간: 목요일 10:00 ~ 12:00"
+            android:textColor="#666666"
+            android:textSize="13sp"
+            android:layout_marginBottom="24dp"/>
+
+        <!-- 하단 세련된 가로형 버튼 바 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="end">
+
+            <!-- 에러를 일으키던 style 속성 제거 후 깔끔한 커스텀 스타일 적용 -->
+            <!-- 닫기 버튼 -->
+            <Button
+                android:id="@+id/btnPopupClose"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="닫기"
+                android:textColor="#757575"
+                android:background="?android:attr/selectableItemBackground"
+                android:layout_marginEnd="8dp"/>
+
+            <!-- 수정 버튼 -->
+            <Button
+                android:id="@+id/btnPopupEdit"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="수정"
+                android:textColor="#283593"
+                android:textStyle="bold"
+                android:background="?android:attr/selectableItemBackground"
+                android:layout_marginEnd="8dp"/>
+
+            <!-- 삭제 버튼 (트렌디한 레드 포인트) -->
+            <Button
+                android:id="@+id/btnPopupDelete"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="삭제"
+                android:textColor="#D32F2F"
+                android:textStyle="bold"
+                android:background="?android:attr/selectableItemBackground"/>
+        </LinearLayout>
+    </LinearLayout>
+</androidx.cardview.widget.CardView>

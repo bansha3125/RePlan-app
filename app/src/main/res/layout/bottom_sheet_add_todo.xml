@@ -1,0 +1,290 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1. 화면이 넘치면 자동으로 부드러운 스크롤을 만들어주는 스크롤 뷰 추가 -->
+<androidx.core.widget.NestedScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@android:color/white">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <!-- 손잡이 바 디자인 -->
+        <View
+            android:layout_width="40dp"
+            android:layout_height="4dp"
+            android:background="#D1D1D6"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginBottom="16dp"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="📝 할 일 간편 추가"
+            android:textColor="#283593"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="20dp"/>
+
+        <!-- 1. 할 일 이름 입력 -->
+        <EditText
+            android:id="@+id/etTodoName"
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:hint="무슨 일을 해야 하나요?"
+            android:background="@android:drawable/editbox_background_normal"
+            android:paddingHorizontal="12dp"
+            android:textSize="14sp"
+            android:layout_marginBottom="16dp"/>
+
+        <!-- 2. 마감 기준 선택 (라디오 그룹) -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="마감 기준"
+            android:textColor="#333333"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp"/>
+
+        <RadioGroup
+            android:id="@+id/rgDeadline"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="16dp">
+
+            <RadioButton
+                android:id="@+id/rbDate"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="날짜로 설정"
+                android:checked="true"
+                android:textSize="13sp"/>
+
+            <RadioButton
+                android:id="@+id/rbSpecificSchedule"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="특정 일정 전까지"
+                android:layout_marginStart="8dp"
+                android:textSize="13sp"/>
+
+            <RadioButton
+                android:id="@+id/rbNoDeadline"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="마감 없음"
+                android:layout_marginStart="8dp"
+                android:textSize="13sp"/>
+        </RadioGroup>
+
+        <!-- 2-1. 특정 일정 전 완료용 드롭다운 영역 (초기값은 GONE) -->
+        <LinearLayout
+            android:id="@+id/layoutSpecificSchedule"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone"
+            android:layout_marginBottom="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="어떤 일정 전까지 완료할까요?"
+                android:textColor="#283593"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="4dp"/>
+
+            <Spinner
+                android:id="@+id/spSpecificSchedule"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@android:drawable/btn_dropdown"/>
+        </LinearLayout>
+
+        <!-- 3. 예상 소요 시간 입력 (단위: 시간) -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="예상 소요 시간"
+            android:textColor="#333333"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp"/>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="16dp">
+
+            <EditText
+                android:id="@+id/etExpectedTime"
+                android:layout_width="80dp"
+                android:layout_height="45dp"
+                android:hint="2"
+                android:inputType="number"
+                android:gravity="center"
+                android:background="@android:drawable/editbox_background_normal"
+                android:textSize="14sp"/>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="시간"
+                android:textColor="#424242"
+                android:layout_marginStart="8dp"
+                android:textSize="14sp"/>
+        </LinearLayout>
+
+        <!-- 4. 우선순위 선택 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="우선순위"
+            android:textColor="#333333"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp"/>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:weightSum="3"
+            android:layout_marginBottom="24dp">
+
+            <Button
+                android:id="@+id/btnPriorityHigh"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:text="상"
+                android:textSize="12sp"
+                android:backgroundTint="#D1D1D6"
+                android:textColor="#333333"
+                android:layout_marginEnd="4dp"/>
+
+            <Button
+                android:id="@+id/btnPriorityMedium"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:text="중"
+                android:textSize="12sp"
+                android:backgroundTint="#283593"
+                android:textColor="#FFFFFF"
+                android:layout_marginEnd="4dp"/>
+
+            <Button
+                android:id="@+id/btnPriorityLow"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:text="하"
+                android:textSize="12sp"
+                android:backgroundTint="#D1D1D6"
+                android:textColor="#333333"/>
+        </LinearLayout>
+
+        <!-- 5. AI 작업 분해 선택 (Gemini 연동) -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="이 작업을 AI로 나눌까요? 🤖"
+            android:textColor="#333333"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp"/>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:weightSum="4"
+            android:layout_marginBottom="24dp">
+
+            <Button
+                android:id="@+id/btnAiNone"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:text="안 함"
+                android:textSize="12sp"
+                android:backgroundTint="#283593"
+                android:textColor="#FFFFFF"
+                android:layout_marginEnd="4dp"/>
+
+            <Button
+                android:id="@+id/btnAi3Steps"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:text="3단계"
+                android:textSize="12sp"
+                android:backgroundTint="#D1D1D6"
+                android:textColor="#333333"
+                android:layout_marginEnd="4dp"/>
+
+            <Button
+                android:id="@+id/btnAi5Steps"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:text="5단계"
+                android:textSize="12sp"
+                android:backgroundTint="#D1D1D6"
+                android:textColor="#333333"
+                android:layout_marginEnd="4dp"/>
+
+            <Button
+                android:id="@+id/btnAi7Steps"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:text="7단계"
+                android:textSize="12sp"
+                android:backgroundTint="#D1D1D6"
+                android:textColor="#333333"/>
+        </LinearLayout>
+
+        <!-- 6. 등록 버튼 및 세부 설정 토글 버튼 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <Button
+                android:id="@+id/btnDetailSettings"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="추가 세부 설정 >"
+                android:textColor="#283593"
+                android:textSize="13sp"
+                android:background="?android:attr/selectableItemBackground"/>
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1"/>
+
+            <Button
+                android:id="@+id/btnRegisterTodo"
+                android:layout_width="120dp"
+                android:layout_height="48dp"
+                android:text="등록"
+                android:textStyle="bold"
+                android:backgroundTint="#283593"
+                android:textColor="#FFFFFF"/>
+        </LinearLayout>
+
+    </LinearLayout>
+</androidx.core.widget.NestedScrollView>
