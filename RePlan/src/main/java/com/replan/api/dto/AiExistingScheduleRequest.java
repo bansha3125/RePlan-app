@@ -1,19 +1,22 @@
 package com.replan.api.dto;
 
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 /**
- * 백엔드가 프론트엔드에 반환하는 AI 생성 일정 DTO.
- *
- * 프론트/DB에서는 Long taskId를 유지하고,
- * AI 응답의 String taskId는 AiScheduleMapper에서 Long으로 변환한다.
+ * 재배치 요청의 existingSchedules 항목.
  */
 @Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
 @Builder
-public class GeneratedScheduleDto {
+public class AiExistingScheduleRequest {
     private String blockId;
-    private Long taskId;
+    private String taskId;
     private String title;
     private Integer stepOrder;
     private String startTime;
@@ -21,10 +24,10 @@ public class GeneratedScheduleDto {
     private String source;
 
     @Builder.Default
-    private boolean locked = false;
+    private Boolean locked = false;
 
     @Builder.Default
-    private boolean completed = false;
+    private Boolean completed = false;
 
     private String reasonCode;
     private String reason;
