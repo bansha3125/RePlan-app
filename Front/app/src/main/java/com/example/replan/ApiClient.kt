@@ -13,6 +13,16 @@ import retrofit2.http.Query
 import java.util.concurrent.TimeUnit
 
 // =========================================================================
+// DTO 데이터 클래스
+// =========================================================================
+data class ReplanScheduleApiRequest(
+    val userId: Long,
+    val replanFromTime: String,
+    val completedTaskIds: List<Long> = emptyList(),
+    val postponedTaskIds: List<Long> = emptyList()
+)
+
+// =========================================================================
 // 백엔드 API 서비스 인터페이스
 // =========================================================================
 interface ScheduleApiService {
@@ -29,8 +39,6 @@ interface ScheduleApiService {
     /**
      * AI 일정 자동 생성
      * POST /schedules/generate
-     *
-     * 생성 API 성공 후 getWeeklySchedules()를 다시 호출해야 함.
      */
     @POST("schedules/generate")
     suspend fun generateSchedules(
@@ -40,8 +48,6 @@ interface ScheduleApiService {
     /**
      * AI 일정 재배치
      * POST /schedules/replan
-     *
-     * 재배치 성공 후 getWeeklySchedules()를 다시 호출해야 함.
      */
     @POST("schedules/replan")
     suspend fun replanSchedules(
@@ -78,9 +84,8 @@ interface ScheduleApiService {
     ): Response<ResponseBody>
 
     /**
-     * 현재 백엔드에 존재 여부가 확인되지 않은 API.
-     * 기존 MainActivity에서 사용 중일 수 있어 일단 유지함.
-     * 실제 호출하면 404가 발생할 수 있음.
+     * 일정 상태 업데이트
+     * POST /schedules/status
      */
     @POST("schedules/status")
     suspend fun updateScheduleStatus(
@@ -94,7 +99,7 @@ interface ScheduleApiService {
 object ApiClient {
 
     /**
-     * Android 에뮬레이터에서 10.0.2.2는 개발 PC의 localhost를 의미함.
+     * Android 에뮬레이터에서 PC의 localhost:8080으로 접근하는 주소
      */
     private const val BASE_URL = "http://10.0.2.2:8080/"
 
