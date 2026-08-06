@@ -21,6 +21,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.temporal.TemporalAdjusters;
 import java.util.*;
+import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
 @Service
@@ -105,7 +106,7 @@ public class ScheduleService {
                 .desiredSteps(request.getDesiredSteps())
                 .build());
     }
-
+    @Transactional
     public void generateAiSchedule(Long userId) {
         LocalDate weekStartDate = getCurrentWeekStart();
         LocalDate weekEndDate = weekStartDate.plusDays(6);
@@ -139,7 +140,7 @@ public class ScheduleService {
         saveGeneratedSchedules(generatedBlocks, userId);
         logAiWarnings(response);
     }
-
+    @Transactional
     public void replanAiSchedule(
             Long userId,
             String replanFromTime,

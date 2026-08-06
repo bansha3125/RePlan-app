@@ -1,2 +1,11 @@
+# IntelliJ
 .idea/
 *.iml
+
+# Local database
+/data/
+*.mv.db
+*.trace.db
+
+# Local environment
+.env
