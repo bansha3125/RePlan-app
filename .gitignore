@@ -10,12 +10,21 @@
 # Local environment
 .env
 
-# Android & Gradle (새로 추가된 항목)
+# Android & Gradle generated files
 .gradle/
+**/.gradle/
 **/build/
-**/local.properties
+**/.cxx/
+**/.externalNativeBuild/
 
-# Android Studio Output
+# Local properties & Android Studio Output
+local.properties
+**/local.properties
+captures/
 *.apk
 *.aar
 *.dex
+
+# Local database lock files
+*.lock.db
+RePlan/data/*.lock.db
