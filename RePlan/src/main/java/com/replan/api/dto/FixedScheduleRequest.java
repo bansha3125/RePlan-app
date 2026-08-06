@@ -10,6 +10,6 @@ public class FixedScheduleRequest {
     private String title;
     private String startTime;
     private String endTime;
-    private boolean repeat;
+    private Boolean repeat;
     private String repeatDay;
 }

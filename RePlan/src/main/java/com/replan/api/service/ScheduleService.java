@@ -9,6 +9,7 @@ import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.*;
@@ -63,8 +64,10 @@ public class ScheduleService {
     }
 
     public void saveFixedSchedule(FixedScheduleRequest request) {
+        Long userId = (request.getUserId() != null) ? request.getUserId() : 1L;
+
         fixedRepository.save(FixedSchedule.builder()
-                .userId(request.getUserId())
+                .userId(userId)
                 .title(request.getTitle())
                 .startTime(LocalDateTime.parse(request.getStartTime()))
                 .endTime(LocalDateTime.parse(request.getEndTime()))
@@ -73,8 +76,10 @@ public class ScheduleService {
     }
 
     public void saveTask(TaskRequest request) {
+        Long userId = (request.getUserId() != null) ? request.getUserId() : 1L;
+
         taskRepository.save(Task.builder()
-                .userId(request.getUserId())
+                .userId(userId)
                 .title(request.getTitle())
                 .deadline(LocalDateTime.parse(request.getDeadline()))
                 .estimatedMinutes(request.getEstimatedMinutes())
@@ -83,6 +88,7 @@ public class ScheduleService {
                 .build());
     }
 
+    @Transactional
     public void generateAiSchedule(Long userId) {
         Map<String, Object> aiRequest = new HashMap<>();
         aiRequest.put("requestId", "generate-user-" + userId + "-" + System.currentTimeMillis());
@@ -91,7 +97,9 @@ public class ScheduleService {
         aiRequest.put("weekEndDate", "2026-08-09");
         aiRequest.put("timezone", "Asia/Seoul");
 
-        aiRequest.put("tasks", taskRepository.findByUserId(userId));
+        List<Task> userTasks = taskRepository.findByUserId(userId);
+        aiRequest.put("tasks", userTasks);
+
         aiRequest.put("fixedSchedules", fixedRepository.findByUserId(userId));
         aiRequest.put("existingSchedules", List.of());
 
@@ -118,6 +126,7 @@ public class ScheduleService {
         }
     }
 
+    @Transactional
     public void replanAiSchedule(Long userId, String replanFromTime, List<Long> completedTaskIds, List<Long> postponedTaskIds) {
         Map<String, Object> aiRequest = new HashMap<>();
         aiRequest.put("requestId", "replan-user-" + userId + "-" + System.currentTimeMillis());
@@ -130,7 +139,9 @@ public class ScheduleService {
         aiRequest.put("completedTaskIds", completedTaskIds != null ? completedTaskIds : List.of());
         aiRequest.put("postponedTaskIds", postponedTaskIds != null ? postponedTaskIds : List.of());
 
-        aiRequest.put("tasks", taskRepository.findByUserId(userId));
+        List<Task> userTasks = taskRepository.findByUserId(userId);
+        Task latestTask = userTasks.isEmpty() ? null : userTasks.get(userTasks.size() - 1);
+        aiRequest.put("tasks", latestTask != null ? List.of(latestTask) : List.of());
         aiRequest.put("fixedSchedules", fixedRepository.findByUserId(userId));
 
         aiRequest.put("existingSchedules", generatedRepository.findByUserId(userId));
@@ -160,19 +171,24 @@ public class ScheduleService {
         }
     }
 
+    @Transactional
     private void saveGeneratedSchedules(List<Map<String, Object>> aiResponse, Long userId) {
         if (aiResponse == null || aiResponse.isEmpty()) return;
 
+        log.info("AI 생성 일정 DB 반영 시작. 받은 개수: {}", aiResponse.size());
+
         generatedRepository.deleteByUserId(userId);
+        generatedRepository.flush();
 
         List<GeneratedSchedule> schedules = aiResponse.stream()
                 .map(map -> {
-                    // taskId가 String이든 Long이든 안전하게 파싱
                     Object rawTaskId = map.get("taskId");
                     Long parsedTaskId = null;
                     if (rawTaskId != null) {
                         parsedTaskId = Long.valueOf(String.valueOf(rawTaskId));
                     }
+
+                    log.info("📌 AI가 보내준 일정 타이틀 확인: {}", map.get("title"));
 
                     return GeneratedSchedule.builder()
                             .userId(userId)
@@ -192,5 +208,44 @@ public class ScheduleService {
                 .toList();
 
         generatedRepository.saveAll(schedules);
+    }
+
+    public void updateScheduleTime(Long userId, String blockId, String startTime, String endTime) {
+        if (blockId == null || startTime == null || endTime == null) {
+            log.warn("일정 시간 변경 실패: 필수 파라미터 누락 (blockId={}, startTime={}, endTime={})", blockId, startTime, endTime);
+            return;
+        }
+
+        String cleanBlockId = blockId.startsWith("generated:") ? blockId.substring("generated:".length()) : blockId;
+
+        log.info("일정 시간 변경 요청 수신 -> 원본 blockId: {}, 정제된 cleanBlockId: {}, start: {}, end: {}", blockId, cleanBlockId, startTime, endTime);
+
+        // 1. AI 생성 일정(GeneratedSchedule) 찾기
+        Optional<GeneratedSchedule> optionalSchedule = generatedRepository.findByBlockId(cleanBlockId);
+        if (optionalSchedule.isEmpty()) {
+            optionalSchedule = generatedRepository.findByBlockId(blockId);
+        }
+
+        if (optionalSchedule.isPresent()) {
+            GeneratedSchedule schedule = optionalSchedule.get();
+            schedule.setStartTime(LocalDateTime.parse(startTime));
+            schedule.setEndTime(LocalDateTime.parse(endTime));
+            generatedRepository.save(schedule);
+            log.info("✨ 생성 일정 시간 DB 업데이트 완료: blockId={}, start={}, end={}", schedule.getBlockId(), startTime, endTime);
+            return;
+        }
+
+        // 2. 고정 일정(FixedSchedule)인 경우
+        try {
+            Long fixedId = Long.valueOf(cleanBlockId);
+            fixedRepository.findById(fixedId).ifPresent(schedule -> {
+                schedule.setStartTime(LocalDateTime.parse(startTime));
+                schedule.setEndTime(LocalDateTime.parse(endTime));
+                fixedRepository.save(schedule);
+                log.info("✨ 고정 일정 시간 DB 업데이트 완료: id={}, start={}, end={}", fixedId, startTime, endTime);
+            });
+        } catch (NumberFormatException e) {
+            log.warn("매칭되는 일정을 찾을 수 없습니다. blockId={}", blockId);
+        }
     }
 }

@@ -4,8 +4,10 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import com.replan.api.entity.GeneratedSchedule;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface GeneratedScheduleRepository extends JpaRepository<GeneratedSchedule, Long> {
     List<GeneratedSchedule> findByUserId(Long userId);
     void deleteByUserId(Long userId);
+    Optional<GeneratedSchedule> findByBlockId(String blockId);
 }
