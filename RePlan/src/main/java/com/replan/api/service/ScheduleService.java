@@ -1,16 +1,25 @@
 package com.replan.api.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.replan.api.dto.*;
-import com.replan.api.entity.*;
-import com.replan.api.repository.*;
+import com.replan.api.entity.FixedSchedule;
+import com.replan.api.entity.GeneratedSchedule;
+import com.replan.api.entity.Task;
+import com.replan.api.repository.FixedScheduleRepository;
+import com.replan.api.repository.GeneratedScheduleRepository;
+import com.replan.api.repository.TaskRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import java.time.DayOfWeek;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.temporal.TemporalAdjusters;
 import java.util.*;
 
 @Slf4j
@@ -18,43 +27,57 @@ import java.util.*;
 @RequiredArgsConstructor
 public class ScheduleService {
 
+    private static final String AI_SERVER_URL =
+            "http://127.0.0.1:8000/schedules/generate";
+
+    private static final String AI_REPLAN_URL =
+            "http://127.0.0.1:8000/ai/schedules/replan";
+
+    private static final String TIMEZONE = "Asia/Seoul";
+
+    /*
+     * 현재 Task 입력 DTO/Entity에 AI 명세의 priority 필드가 없으므로
+     * 임시 기본값을 사용한다. 추후 프론트 입력값과 DB 컬럼을 연결하면
+     * task.getPriority() 값으로 교체한다.
+     */
+    private static final int DEFAULT_PRIORITY = 2;
+
     private final FixedScheduleRepository fixedRepository;
     private final GeneratedScheduleRepository generatedRepository;
     private final TaskRepository taskRepository;
     private final RestTemplate restTemplate;
-
-    private static final String AI_SERVER_URL = "http://127.0.0.1:8000/schedules/generate";
-    private static final String AI_REPLAN_URL = "http://127.0.0.1:8000/ai/schedules/replan";
+    private final ObjectMapper objectMapper;
 
     public WeeklyScheduleResponse getWeeklySchedules(Long userId) {
-        // 1. 고정 일정 DTO 매핑
-        List<FixedScheduleDto> fixedDtos = fixedRepository.findByUserId(userId).stream()
+        List<FixedScheduleDto> fixedDtos = fixedRepository.findByUserId(userId)
+                .stream()
                 .map(f -> FixedScheduleDto.builder()
                         .fixedScheduleId(f.getFixedScheduleId())
                         .title(f.getTitle())
                         .startTime(f.getStartTime().toString())
                         .endTime(f.getEndTime().toString())
                         .repeatDay(f.getRepeatDay())
-                        .locked(true) // 고정 일정은 기본 locked 처리
+                        .locked(true)
                         .build())
                 .toList();
 
-        // 2. AI 생성 일정 DTO 매핑
-        List<GeneratedScheduleDto> generatedDtos = generatedRepository.findByUserId(userId).stream()
-                .map(g -> GeneratedScheduleDto.builder()
-                        .blockId(g.getBlockId())
-                        .taskId(g.getTaskId())
-                        .title(g.getTitle())
-                        .stepOrder(g.getStepOrder())
-                        .startTime(g.getStartTime().toString())
-                        .endTime(g.getEndTime().toString())
-                        .source(g.getSource())
-                        .locked(g.getLocked() != null ? g.getLocked() : false)
-                        .completed(g.getCompleted() != null ? g.getCompleted() : false)
-                        .reasonCode(g.getReasonCode())
-                        .reason(g.getReason())
-                        .build())
-                .toList();
+        List<GeneratedScheduleDto> generatedDtos =
+                generatedRepository.findByUserId(userId)
+                        .stream()
+                        .map(g -> GeneratedScheduleDto.builder()
+                                .blockId(g.getBlockId())
+                                .taskId(g.getTaskId())
+                                .title(g.getTitle())
+                                .stepOrder(g.getStepOrder())
+                                .startTime(g.getStartTime().toString())
+                                .endTime(g.getEndTime().toString())
+                                .source(g.getSource())
+                                .locked(Boolean.TRUE.equals(g.getLocked()))
+                                .completed(Boolean.TRUE.equals(g.getCompleted()))
+                                .reasonCode(g.getReasonCode())
+                                .reason(g.getReason())
+                                .build())
+                        .toList();
 
         return WeeklyScheduleResponse.builder()
                 .fixedSchedules(fixedDtos)
@@ -84,113 +107,354 @@ public class ScheduleService {
     }
 
     public void generateAiSchedule(Long userId) {
-        Map<String, Object> aiRequest = new HashMap<>();
-        aiRequest.put("requestId", "generate-user-" + userId + "-" + System.currentTimeMillis());
-        aiRequest.put("userId", userId);
-        aiRequest.put("weekStartDate", "2026-08-03");
-        aiRequest.put("weekEndDate", "2026-08-09");
-        aiRequest.put("timezone", "Asia/Seoul");
+        LocalDate weekStartDate = getCurrentWeekStart();
+        LocalDate weekEndDate = weekStartDate.plusDays(6);
 
-        aiRequest.put("tasks", taskRepository.findByUserId(userId));
-        aiRequest.put("fixedSchedules", fixedRepository.findByUserId(userId));
-        aiRequest.put("existingSchedules", List.of());
+        List<AiTaskRequest> aiTasks = buildAiTasks(userId);
+        validateUniqueTaskIds(aiTasks);
+
+        GenerateScheduleRequest aiRequest =
+                GenerateScheduleRequest.builder()
+                        .requestId("generate-user-" + userId + "-" + UUID.randomUUID())
+                        .userId(userId)
+                        .weekStartDate(weekStartDate.toString())
+                        .weekEndDate(weekEndDate.toString())
+                        .timezone(TIMEZONE)
+                        .tasks(aiTasks)
+                        .fixedSchedules(buildAiFixedSchedules(userId))
+                        .existingSchedules(new ArrayList<>())
+                        .build();
+
+        AiScheduleResponse response = postToAi(AI_SERVER_URL, aiRequest);
+
+        List<AiScheduleBlockResponse> generatedBlocks =
+                extractGeneratedBlocks(response);
+
+        log.info(
+                "AI 스케줄 생성 성공: 생성 일정 {}개, 미배치 작업 {}개",
+                generatedBlocks.size(),
+                sizeOf(response.getUnscheduledTasks())
+        );
+
+        saveGeneratedSchedules(generatedBlocks, userId);
+        logAiWarnings(response);
+    }
+
+    public void replanAiSchedule(
+            Long userId,
+            String replanFromTime,
+            List<Long> completedTaskIds,
+            List<Long> postponedTaskIds
+    ) {
+        LocalDate weekStartDate = getCurrentWeekStart();
+        LocalDate weekEndDate = weekStartDate.plusDays(6);
+
+        List<AiTaskRequest> aiTasks = buildAiTasks(userId);
+        validateUniqueTaskIds(aiTasks);
+
+        ReplanRequest aiRequest = ReplanRequest.builder()
+                .requestId("replan-user-" + userId + "-" + UUID.randomUUID())
+                .userId(userId)
+                .weekStartDate(weekStartDate.toString())
+                .weekEndDate(weekEndDate.toString())
+                .timezone(TIMEZONE)
+                .replanFromTime(replanFromTime)
+                .completedTaskIds(toStringIds(completedTaskIds))
+                .postponedTaskIds(toStringIds(postponedTaskIds))
+                .tasks(aiTasks)
+                .fixedSchedules(buildAiFixedSchedules(userId))
+                .existingSchedules(buildExistingSchedules(userId))
+                .build();
+
+        AiScheduleResponse response = postToAi(AI_REPLAN_URL, aiRequest);
+
+        /*
+         * schedules만 저장하면 locked 상태로 preservedSchedules에 들어온
+         * 기존 생성 일정이 DB에서 사라질 수 있다.
+         * finalSchedules가 있으면 이를 사용하고, 없으면
+         * schedules + preservedSchedules를 합친 뒤 FIXED 일정을 제외한다.
+         */
+        List<AiScheduleBlockResponse> generatedBlocks =
+                extractGeneratedBlocks(response);
+
+        log.info(
+                "AI 일정 재배치 성공: 최종 생성 일정 {}개, 변경사항 {}개, 미배치 작업 {}개",
+                generatedBlocks.size(),
+                sizeOf(response.getChanges()),
+                sizeOf(response.getUnscheduledTasks())
+        );
+
+        saveGeneratedSchedules(generatedBlocks, userId);
+        logAiWarnings(response);
+    }
+
+    private List<AiTaskRequest> buildAiTasks(Long userId) {
+        return taskRepository.findByUserId(userId)
+                .stream()
+                .map(task -> AiTaskRequest.builder()
+                        .taskId(String.valueOf(task.getTaskId()))
+                        .title(task.getTitle())
+                        .estimatedMinutes(task.getEstimatedMinutes())
+                        .deadline(task.getDeadline().toString())
+
+                        /*
+                         * AI 명세상 필수값이다.
+                         * 현재 TaskRequest/Task Entity에 연결된 필드가 없어 임시 기본값 사용.
+                         */
+                        .priority(DEFAULT_PRIORITY)
+
+                        .difficulty(null)
+                        .focusRequired(null)
+                        .postponeCount(0)
+                        .completedMinutes(0)
+                        .remainingMinutes(task.getEstimatedMinutes())
+                        .completed(false)
+                        .prerequisiteTaskIds(new ArrayList<>())
+                        .build())
+                .toList();
+    }
+
+    private List<AiFixedScheduleRequest> buildAiFixedSchedules(Long userId) {
+        return fixedRepository.findByUserId(userId)
+                .stream()
+                .map(fixed -> AiFixedScheduleRequest.builder()
+                        .fixedScheduleId(fixed.getFixedScheduleId())
+                        .title(fixed.getTitle())
+                        .startTime(fixed.getStartTime().toString())
+                        .endTime(fixed.getEndTime().toString())
+                        .build())
+                .toList();
+    }
+
+    private List<AiExistingScheduleRequest> buildExistingSchedules(Long userId) {
+        return generatedRepository.findByUserId(userId)
+                .stream()
+                .map(schedule -> AiExistingScheduleRequest.builder()
+                        .blockId(schedule.getBlockId())
+                        .taskId(
+                                schedule.getTaskId() == null
+                                        ? null
+                                        : String.valueOf(schedule.getTaskId())
+                        )
+                        .title(schedule.getTitle())
+                        .stepOrder(schedule.getStepOrder())
+                        .startTime(schedule.getStartTime().toString())
+                        .endTime(schedule.getEndTime().toString())
+                        .source(schedule.getSource())
+                        .locked(Boolean.TRUE.equals(schedule.getLocked()))
+                        .completed(Boolean.TRUE.equals(schedule.getCompleted()))
+                        .reasonCode(schedule.getReasonCode())
+                        .reason(schedule.getReason())
+                        .build())
+                .toList();
+    }
+
+    private AiScheduleResponse postToAi(String url, Object request) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        log.info("[BACKEND -> AI] {}", toJson(request));
 
         try {
-            // 상수로 선언한 URL 사용
-            ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
-                    AI_SERVER_URL,
-                    HttpMethod.POST,
-                    new HttpEntity<>(aiRequest),
-                    new ParameterizedTypeReference<Map<String, Object>>() {}
+            ResponseEntity<AiScheduleResponse> response =
+                    restTemplate.exchange(
+                            url,
+                            HttpMethod.POST,
+                            new HttpEntity<>(request, headers),
+                            AiScheduleResponse.class
+                    );
+
+            AiScheduleResponse body = response.getBody();
+
+            log.info(
+                    "[AI -> BACKEND] status={}, body={}",
+                    response.getStatusCode(),
+                    toJson(body)
             );
 
-            Map<String, Object> responseBody = response.getBody();
-            if (responseBody != null && responseBody.containsKey("schedules")) {
-                @SuppressWarnings("unchecked")
-                List<Map<String, Object>> aiResponseSchedules = (List<Map<String, Object>>) responseBody.get("schedules");
-
-                log.info("AI 스케줄 생성 성공, 결과 수신 완료. 개수: {}", aiResponseSchedules.size());
-                saveGeneratedSchedules(aiResponseSchedules, userId);
+            if (body == null) {
+                throw new IllegalStateException("AI 서버 응답 본문이 비어 있습니다.");
             }
 
-        } catch (Exception e) {
-            log.error("AI 서버 통신 실패: {}", e.getMessage(), e);
+            if (!Boolean.TRUE.equals(body.getSuccess())) {
+                throw new IllegalStateException(
+                        "AI 서버 요청 실패: " + body.getMessage()
+                );
+            }
+
+            return body;
+
+        } catch (Exception exception) {
+            log.error(
+                    "AI 서버 통신 실패: url={}, message={}",
+                    url,
+                    exception.getMessage(),
+                    exception
+            );
+            throw new IllegalStateException(
+                    "AI 서버 통신에 실패했습니다.",
+                    exception
+            );
         }
     }
 
-    public void replanAiSchedule(Long userId, String replanFromTime, List<Long> completedTaskIds, List<Long> postponedTaskIds) {
-        Map<String, Object> aiRequest = new HashMap<>();
-        aiRequest.put("requestId", "replan-user-" + userId + "-" + System.currentTimeMillis());
-        aiRequest.put("userId", userId);
-        aiRequest.put("weekStartDate", "2026-08-03");
-        aiRequest.put("weekEndDate", "2026-08-09");
-        aiRequest.put("timezone", "Asia/Seoul");
-        aiRequest.put("replanFromTime", replanFromTime);
+    private List<AiScheduleBlockResponse> extractGeneratedBlocks(
+            AiScheduleResponse response
+    ) {
+        List<AiScheduleBlockResponse> candidates = new ArrayList<>();
 
-        aiRequest.put("completedTaskIds", completedTaskIds != null ? completedTaskIds : List.of());
-        aiRequest.put("postponedTaskIds", postponedTaskIds != null ? postponedTaskIds : List.of());
-
-        aiRequest.put("tasks", taskRepository.findByUserId(userId));
-        aiRequest.put("fixedSchedules", fixedRepository.findByUserId(userId));
-
-        aiRequest.put("existingSchedules", generatedRepository.findByUserId(userId));
-
-        try {
-            ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
-                    AI_REPLAN_URL,
-                    HttpMethod.POST,
-                    new HttpEntity<>(aiRequest),
-                    new ParameterizedTypeReference<Map<String, Object>>() {}
-            );
-
-            Map<String, Object> responseBody = response.getBody();
-            if (responseBody != null && (Boolean.TRUE.equals(responseBody.get("success")) || responseBody.containsKey("schedules"))) {
-                @SuppressWarnings("unchecked")
-                List<Map<String, Object>> aiResponseSchedules = (List<Map<String, Object>>) responseBody.get("schedules");
-
-                log.info("AI 일정 재배치 성공, 결과 수신 완료. 개수: {}", aiResponseSchedules != null ? aiResponseSchedules.size() : 0);
-
-                if (aiResponseSchedules != null) {
-                    saveGeneratedSchedules(aiResponseSchedules, userId);
-                }
+        if (response.getFinalSchedules() != null
+                && !response.getFinalSchedules().isEmpty()) {
+            candidates.addAll(response.getFinalSchedules());
+        } else {
+            if (response.getSchedules() != null) {
+                candidates.addAll(response.getSchedules());
             }
 
-        } catch (Exception e) {
-            log.error("AI 서버 재배치 통신 실패: {}", e.getMessage(), e);
+            if (response.getPreservedSchedules() != null) {
+                candidates.addAll(response.getPreservedSchedules());
+            }
         }
+
+        /*
+         * preservedSchedules/finalSchedules에는 fixed 일정도 포함될 수 있으므로
+         * taskId가 있는 일정만 GeneratedSchedule 테이블에 저장한다.
+         * blockId를 기준으로 중복도 제거한다.
+         */
+        Map<String, AiScheduleBlockResponse> uniqueSchedules =
+                new LinkedHashMap<>();
+
+        for (AiScheduleBlockResponse block : candidates) {
+            if (block == null || block.getTaskId() == null) {
+                continue;
+            }
+
+            String key = block.getBlockId();
+
+            if (key == null || key.isBlank()) {
+                key = block.getTaskId()
+                        + "|"
+                        + block.getStartTime()
+                        + "|"
+                        + block.getEndTime();
+            }
+
+            uniqueSchedules.put(key, block);
+        }
+
+        return new ArrayList<>(uniqueSchedules.values());
     }
 
-    private void saveGeneratedSchedules(List<Map<String, Object>> aiResponse, Long userId) {
-        if (aiResponse == null || aiResponse.isEmpty()) return;
-
+    private void saveGeneratedSchedules(
+            List<AiScheduleBlockResponse> aiResponse,
+            Long userId
+    ) {
+        /*
+         * 결과가 비어 있어도 기존 일정을 먼저 지워야 한다.
+         * 그렇지 않으면 AI가 모든 작업을 미배치한 경우 옛 일정이 남는다.
+         */
         generatedRepository.deleteByUserId(userId);
 
-        List<GeneratedSchedule> schedules = aiResponse.stream()
-                .map(map -> {
-                    // taskId가 String이든 Long이든 안전하게 파싱
-                    Object rawTaskId = map.get("taskId");
-                    Long parsedTaskId = null;
-                    if (rawTaskId != null) {
-                        parsedTaskId = Long.valueOf(String.valueOf(rawTaskId));
-                    }
+        if (aiResponse == null || aiResponse.isEmpty()) {
+            return;
+        }
 
-                    return GeneratedSchedule.builder()
-                            .userId(userId)
-                            .taskId(parsedTaskId)
-                            .title((String) map.get("title"))
-                            .startTime(LocalDateTime.parse((String) map.get("startTime")))
-                            .endTime(LocalDateTime.parse((String) map.get("endTime")))
-                            .blockId((String) map.get("blockId"))
-                            .stepOrder(map.get("stepOrder") != null ? ((Number) map.get("stepOrder")).intValue() : null)
-                            .source((String) map.get("source"))
-                            .locked(map.get("locked") != null && (Boolean) map.get("locked"))
-                            .completed(map.get("completed") != null && (Boolean) map.get("completed"))
-                            .reasonCode((String) map.get("reasonCode"))
-                            .reason((String) map.get("reason"))
-                            .build();
-                })
+        List<GeneratedSchedule> schedules = aiResponse.stream()
+                .map(block -> GeneratedSchedule.builder()
+                        .userId(userId)
+                        .taskId(parseLongTaskId(block.getTaskId()))
+                        .title(block.getTitle())
+                        .startTime(parseDateTime(block.getStartTime(), "startTime"))
+                        .endTime(parseDateTime(block.getEndTime(), "endTime"))
+                        .blockId(block.getBlockId())
+                        .stepOrder(block.getStepOrder())
+                        .source(block.getSource())
+                        .locked(Boolean.TRUE.equals(block.getLocked()))
+                        .completed(Boolean.TRUE.equals(block.getCompleted()))
+                        .reasonCode(block.getReasonCode())
+                        .reason(block.getReason())
+                        .build())
                 .toList();
 
         generatedRepository.saveAll(schedules);
+    }
+
+    private Long parseLongTaskId(String taskId) {
+        if (taskId == null || taskId.isBlank()) {
+            return null;
+        }
+
+        try {
+            return Long.valueOf(taskId);
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException(
+                    "AI가 반환한 taskId가 Long 형식이 아닙니다: " + taskId,
+                    exception
+            );
+        }
+    }
+
+    private LocalDateTime parseDateTime(String value, String fieldName) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(
+                    "AI 응답의 " + fieldName + " 값이 비어 있습니다."
+            );
+        }
+
+        return LocalDateTime.parse(value);
+    }
+
+    private void validateUniqueTaskIds(List<AiTaskRequest> tasks) {
+        Set<String> uniqueIds = new HashSet<>();
+
+        for (AiTaskRequest task : tasks) {
+            if (task.getTaskId() == null || task.getTaskId().isBlank()) {
+                throw new IllegalStateException(
+                        "AI 요청 작업에 taskId가 없는 항목이 있습니다."
+                );
+            }
+
+            if (!uniqueIds.add(task.getTaskId())) {
+                throw new IllegalStateException(
+                        "AI 요청에 중복된 taskId가 있습니다: "
+                                + task.getTaskId()
+                );
+            }
+        }
+    }
+
+    private List<String> toStringIds(List<Long> ids) {
+        if (ids == null) {
+            return new ArrayList<>();
+        }
+
+        return ids.stream()
+                .filter(Objects::nonNull)
+                .map(String::valueOf)
+                .toList();
+    }
+
+    private LocalDate getCurrentWeekStart() {
+        return LocalDate.now(ZoneId.of(TIMEZONE))
+                .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+    }
+
+    private void logAiWarnings(AiScheduleResponse response) {
+        if (response.getWarnings() != null
+                && !response.getWarnings().isEmpty()) {
+            log.warn("[AI WARNINGS] {}", toJson(response.getWarnings()));
+        }
+    }
+
+    private int sizeOf(Collection<?> collection) {
+        return collection == null ? 0 : collection.size();
+    }
+
+    private String toJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException exception) {
+            return String.valueOf(value);
+        }
     }
 }
