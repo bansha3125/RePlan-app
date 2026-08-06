@@ -10,16 +10,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 백엔드가 AI 서버 POST /ai/schedules/replan 로 전송하는 요청 DTO.
- *
- * 기존 List<Object>를 실제 규격 타입으로 교체했다.
+ * 백엔드가 AI 서버 POST /schedules/generate 로 전송하는 요청 DTO.
  */
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class ReplanRequest {
+public class GenerateScheduleRequest {
     private String requestId;
     private Long userId;
     private String weekStartDate;
@@ -27,14 +25,6 @@ public class ReplanRequest {
 
     @Builder.Default
     private String timezone = "Asia/Seoul";
-
-    private String replanFromTime;
-
-    @Builder.Default
-    private List<String> completedTaskIds = new ArrayList<>();
-
-    @Builder.Default
-    private List<String> postponedTaskIds = new ArrayList<>();
 
     @Builder.Default
     private List<AiTaskRequest> tasks = new ArrayList<>();
