@@ -96,8 +96,7 @@ class MainActivity : AppCompatActivity() {
             lifecycleScope.launch {
                 try {
                     val response = ApiClient.service.getWeeklySchedules(
-                        userId = 1L,
-                        weekStartDate = getCurrentWeekStartDate()
+                        userId = 1L
                     )
 
                     Log.d("SERVER_RESPONSE", "주간 조회 fixed: ${response.fixedSchedules.size}, generated: ${response.generatedSchedules.size}")
@@ -160,13 +159,48 @@ class MainActivity : AppCompatActivity() {
         simulateServerLoading("AI 일정을 생성하고 있습니다...") {
             lifecycleScope.launch {
                 try {
-                    Log.d("AI_CALL", "백엔드 AI 스케줄링 API(generateSchedules) Query Param으로 호출")
-                    val response = ApiClient.service.generateSchedules(userId = 1L)
+                    Log.d(
+                        "AI_CALL",
+                        "백엔드 AI 스케줄링 API(generateSchedules) Request Body로 호출"
+                    )
 
-                    Log.d("AI_RESPONSE", "AI 정렬 fixed: ${response.fixedSchedules.size}, generated: ${response.generatedSchedules.size}")
+                    val generateResponse = ApiClient.service.generateSchedules(
+                        request = GenerateScheduleApiRequest(
+                            userId = 1L
+                        )
+                    )
 
-                    currentGeneratedSchedules = response.generatedSchedules
-                    handleGeneratedSchedulesResponse(response)
+                    if (generateResponse.isSuccessful) {
+
+                        Log.d(
+                            "AI_RESPONSE",
+                            "AI 일정 생성 성공: HTTP ${generateResponse.code()}"
+                        )
+
+                        // 생성 API는 성공 메시지만 반환하므로
+                        // 실제 생성 일정을 다시 조회한다.
+                        val weeklyResponse = ApiClient.service.getWeeklySchedules(
+                            userId = 1L
+                        )
+
+                        Log.d(
+                            "AI_RESPONSE",
+                            "AI 정렬 fixed: ${weeklyResponse.fixedSchedules.size}, " +
+                                    "generated: ${weeklyResponse.generatedSchedules.size}"
+                        )
+
+                        currentGeneratedSchedules = weeklyResponse.generatedSchedules
+
+                        handleGeneratedSchedulesResponse(weeklyResponse)
+
+                    } else {
+
+                        Log.e(
+                            "AI_RESPONSE",
+                            "AI 일정 생성 실패: HTTP ${generateResponse.code()}, " +
+                                    "error=${generateResponse.errorBody()?.string()}"
+                        )
+                    }
 
                 } catch (e: Exception) {
                     e.printStackTrace()
