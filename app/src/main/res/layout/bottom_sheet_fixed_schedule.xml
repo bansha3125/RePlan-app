@@ -1,0 +1,230 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 🛠️ 1. 스크롤이 가능하게 감싸 기기 대응력을 200% 올림 -->
+<androidx.core.widget.NestedScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="#FFFFFF">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <!-- 1. 바텀 시트 상단바 -->
+        <View
+            android:layout_width="40dp"
+            android:layout_height="4dp"
+            android:background="#E0E0E0"
+            android:layout_gravity="center"
+            android:layout_marginBottom="16dp"/>
+
+        <!-- 2. 타이틀 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="[고정 일정] 입력"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:textColor="#111111"
+            android:layout_marginBottom="24dp"/>
+
+        <!-- 3. 일정 이름 입력 칸 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="일정 이름"
+            android:textColor="#757575"
+            android:textStyle="bold"
+            android:textSize="12sp"/>
+        <EditText
+            android:id="@+id/etScheduleName"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:hint="예: 데이터구조 강의, 알바, 약속"
+            android:background="#F5F5F5"
+            android:paddingHorizontal="16dp"
+            android:textSize="14sp"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="16dp"
+            android:importantForAutofill="no"
+            android:inputType="text"/>
+
+        <!-- 4. 시작 시간 입력 칸 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="시작 시간"
+            android:textColor="#757575"
+            android:textStyle="bold"
+            android:textSize="12sp"/>
+        <EditText
+            android:id="@+id/etStartTime"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:hint="10:00"
+            android:background="#F5F5F5"
+            android:paddingHorizontal="16dp"
+            android:textSize="14sp"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="16dp"
+            android:importantForAutofill="no"
+            android:inputType="time"/>
+
+        <!-- 5. 종료 시간 입력 칸 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="종료 시간"
+            android:textColor="#757575"
+            android:textStyle="bold"
+            android:textSize="12sp"/>
+        <EditText
+            android:id="@+id/etEndTime"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:hint="11:30"
+            android:background="#F5F5F5"
+            android:paddingHorizontal="16dp"
+            android:textSize="14sp"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="24dp"
+            android:importantForAutofill="no"
+            android:inputType="time"/>
+
+        <!-- 6. 반복 요일 선택 영역 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="반복 요일 선택"
+            android:textColor="#757575"
+            android:textStyle="bold"
+            android:textSize="12sp"
+            android:layout_marginBottom="12dp"/>
+
+        <!-- 🛠️ 요일 레이아웃: weightSum을 7로 줘서 화면 너비에 맞게 균등 배분하도록 변경! -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:weightSum="7"
+            android:gravity="center"
+            android:layout_marginBottom="32dp">
+
+            <!-- 각 버튼의 layout_width를 0dp로 두고 layout_weight를 1로 지정했습니다. -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnMon"
+                android:layout_width="0dp"
+                android:layout_height="38dp"
+                android:layout_weight="1"
+                android:text="월"
+                android:padding="0dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:textColor="#FFFFFF"
+                app:backgroundTint="#283593"
+                android:layout_marginEnd="4dp"
+                android:textStyle="bold"
+                app:cornerRadius="19dp"/>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnTue"
+                android:layout_width="0dp"
+                android:layout_height="38dp"
+                android:layout_weight="1"
+                android:text="화"
+                android:padding="0dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:textColor="#424242"
+                app:backgroundTint="#E0E0E0"
+                android:layout_marginEnd="4dp"
+                app:cornerRadius="19dp"/>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnWed"
+                android:layout_width="0dp"
+                android:layout_height="38dp"
+                android:layout_weight="1"
+                android:text="수"
+                android:padding="0dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:textColor="#FFFFFF"
+                app:backgroundTint="#283593"
+                android:layout_marginEnd="4dp"
+                android:textStyle="bold"
+                app:cornerRadius="19dp"/>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnThu"
+                android:layout_width="0dp"
+                android:layout_height="38dp"
+                android:layout_weight="1"
+                android:text="목"
+                android:padding="0dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:textColor="#424242"
+                app:backgroundTint="#E0E0E0"
+                android:layout_marginEnd="4dp"
+                app:cornerRadius="19dp"/>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnFri"
+                android:layout_width="0dp"
+                android:layout_height="38dp"
+                android:layout_weight="1"
+                android:text="금"
+                android:padding="0dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:textColor="#424242"
+                app:backgroundTint="#E0E0E0"
+                android:layout_marginEnd="4dp"
+                app:cornerRadius="19dp"/>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnSat"
+                android:layout_width="0dp"
+                android:layout_height="38dp"
+                android:layout_weight="1"
+                android:text="토"
+                android:padding="0dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:textColor="#424242"
+                app:backgroundTint="#E0E0E0"
+                android:layout_marginEnd="4dp"
+                app:cornerRadius="19dp"/>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnSun"
+                android:layout_width="0dp"
+                android:layout_height="38dp"
+                android:layout_weight="1"
+                android:text="일"
+                android:padding="0dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:textColor="#424242"
+                app:backgroundTint="#E0E0E0"
+                app:cornerRadius="19dp"/>
+        </LinearLayout>
+
+        <!-- 7. 등록 버튼 -->
+        <Button
+            android:id="@+id/btnRegister"
+            android:layout_width="match_parent"
+            android:layout_height="54dp"
+            android:text="등록"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:backgroundTint="#283593"
+            app:cornerRadius="12dp"/>
+
+    </LinearLayout>
+</androidx.core.widget.NestedScrollView>
