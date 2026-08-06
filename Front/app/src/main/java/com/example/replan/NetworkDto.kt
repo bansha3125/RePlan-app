@@ -79,3 +79,11 @@ data class TaskResponse(
     @SerializedName("priority") val priority: Int = 2,
     @SerializedName("desiredSteps") val desiredSteps: Int = 0
 )
+
+// AI 일정 재배치 요청 DTO (POST /schedules/replan)
+data class ReplanScheduleApiRequest(
+    @SerializedName("userId") val userId: Long,
+    @SerializedName("replanFromTime") val replanFromTime: String,
+    @SerializedName("completedTaskIds") val completedTaskIds: List<Long> = emptyList(),
+    @SerializedName("postponedTaskIds") val postponedTaskIds: List<Long> = emptyList()
+)

@@ -13,14 +13,7 @@ import retrofit2.http.Query
 import java.util.concurrent.TimeUnit
 
 // =========================================================================
-// AI 일정 생성 요청
-// POST /schedules/generate
-// =========================================================================
-
-
-// =========================================================================
-// AI 일정 재배치 요청
-// POST /schedules/replan
+// DTO 데이터 클래스
 // =========================================================================
 data class ReplanScheduleApiRequest(
     val userId: Long,
@@ -46,11 +39,6 @@ interface ScheduleApiService {
     /**
      * AI 일정 자동 생성
      * POST /schedules/generate
-     *
-     * 요청 JSON:
-     * {
-     *   "userId": 1
-     * }
      */
     @POST("schedules/generate")
     suspend fun generateSchedules(
@@ -77,10 +65,7 @@ interface ScheduleApiService {
 
     /**
      * 할 일 신규 등록
-     * POST /schedules/tasks
-     *
-     * 이 부분은 백엔드 Controller 확인 전까지
-     * 기존 프론트 규격을 유지함.
+     * POST /schedules/tasks?userId=1
      */
     @POST("schedules/tasks")
     suspend fun createTask(
@@ -90,10 +75,7 @@ interface ScheduleApiService {
 
     /**
      * 고정 일정 신규 등록
-     * POST /schedules/fixed-schedules
-     *
-     * 이 부분은 백엔드 Controller 확인 전까지
-     * 기존 프론트 규격을 유지함.
+     * POST /schedules/fixed-schedules?userId=1
      */
     @POST("schedules/fixed-schedules")
     suspend fun createFixedSchedule(
@@ -103,9 +85,7 @@ interface ScheduleApiService {
 
     /**
      * 일정 상태 업데이트
-     *
-     * 현재 백엔드에 /schedules/status가 있는지
-     * 아직 최종 확인되지 않았으므로 기존 코드를 유지함.
+     * POST /schedules/status
      */
     @POST("schedules/status")
     suspend fun updateScheduleStatus(
@@ -119,8 +99,7 @@ interface ScheduleApiService {
 object ApiClient {
 
     /**
-     * Android 에뮬레이터에서
-     * PC의 localhost:8080으로 접근하는 주소
+     * Android 에뮬레이터에서 PC의 localhost:8080으로 접근하는 주소
      */
     private const val BASE_URL = "http://10.0.2.2:8080/"
 
