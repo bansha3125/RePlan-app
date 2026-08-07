@@ -107,8 +107,12 @@ public class ScheduleService {
                 .build());
     }
     @Transactional
-    public void generateAiSchedule(Long userId) {
-        LocalDate weekStartDate = getCurrentWeekStart();
+    public void generateAiSchedule(Long userId, String weekStartDateParam) {
+
+        LocalDate weekStartDate = (weekStartDateParam != null && !weekStartDateParam.isBlank())
+                ? LocalDate.parse(weekStartDateParam)
+                : getCurrentWeekStart();
+
         LocalDate weekEndDate = weekStartDate.plusDays(6);
 
         List<AiTaskRequest> aiTasks = buildAiTasks(userId);
@@ -140,6 +144,7 @@ public class ScheduleService {
         saveGeneratedSchedules(generatedBlocks, userId);
         logAiWarnings(response);
     }
+
     @Transactional
     public void replanAiSchedule(
             Long userId,
