@@ -25,16 +25,23 @@ interface ScheduleApiService {
 
     /**
      * AI 일정 자동 생성 API (POST /schedules/generate)
-     * 🚀 백엔드 @RequestParam 규격에 맞게 @Query 파라미터로 전송
+     * 🚀 백엔드 @RequestBody Map<String, Object> 규격에 맞춰 Body 전송
      */
     @POST("schedules/generate")
     suspend fun generateSchedules(
-        @Query("userId") userId: Long = 1L
-    ): WeeklyScheduleResponse
+        @Body request: GenerateScheduleApiRequest
+    ): Response<ResponseBody>
+
+    /**
+     * AI 일정 재배치 API (POST /schedules/replan)
+     */
+    @POST("schedules/replan")
+    suspend fun replanSchedules(
+        @Body request: ReplanApiRequest
+    ): Response<ResponseBody>
 
     /**
      * 등록된 할 일 목록 조회 API (GET /schedules/tasks)
-     * 🚀 [추가] 앱 재진입 시 DB에서 Task 목록을 불러와 하단 리스트에 복원
      */
     @GET("schedules/tasks")
     suspend fun getTasks(
@@ -46,7 +53,6 @@ interface ScheduleApiService {
      */
     @POST("schedules/tasks")
     suspend fun createTask(
-        @Query("userId") userId: Long = 1L,
         @Body request: CreateTaskApiRequest
     ): Response<ResponseBody>
 
@@ -55,17 +61,16 @@ interface ScheduleApiService {
      */
     @POST("schedules/fixed-schedules")
     suspend fun createFixedSchedule(
-        @Query("userId") userId: Long = 1L,
         @Body request: CreateFixedScheduleApiRequest
     ): Response<ResponseBody>
 
     /**
-     * 일정 상태 업데이트 API (완료, 고정 등)
+     * 고정 일정 목록 조회 API (GET /schedules/fixed-schedules)
      */
-    @POST("schedules/status")
-    suspend fun updateScheduleStatus(
-        @Body request: UpdateScheduleStatusApiRequest
-    ): WeeklyScheduleResponse
+    @GET("schedules/fixed-schedules")
+    suspend fun getFixedSchedules(
+        @Query("userId") userId: Long = 1L
+    ): List<FixedScheduleDto>
 }
 
 // =========================================================================

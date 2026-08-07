@@ -43,6 +43,12 @@ class MainActivity : AppCompatActivity() {
 
     private val completedStepsMap = mutableMapOf<String, MutableSet<Int>>()
 
+    // 현재 선택된 주차 기준 날짜 (기본값: 이번 주 월요일)
+    private var currentWeekCalendar: Calendar = Calendar.getInstance().apply {
+        firstDayOfWeek = Calendar.MONDAY
+        set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -73,6 +79,12 @@ class MainActivity : AppCompatActivity() {
             startAiReplayPipeline()
         }
 
+        val btnPrevWeek = findViewSafely<View>("btnPrevWeek") ?: findViewSafely<View>("btn_prev")
+        val btnNextWeek = findViewSafely<View>("btnNextWeek") ?: findViewSafely<View>("btn_next")
+
+        btnPrevWeek?.setOnClickListener { changeWeek(-1) }
+        btnNextWeek?.setOnClickListener { changeWeek(1) }
+
         setupDragAndDropContainers()
         setupReplayController()
         loadWeeklySchedulesFromServer()
@@ -83,12 +95,34 @@ class MainActivity : AppCompatActivity() {
         return if (id != 0) findViewById(id) else null
     }
 
+    private fun changeWeek(amount: Int) {
+        currentWeekCalendar.add(Calendar.WEEK_OF_YEAR, amount)
+        updateHeaderWeekRangeText()
+        loadWeeklySchedulesFromServer()
+    }
+
     private fun updateHeaderWeekRangeText() {
-        val headerLayout = findViewSafely<LinearLayout>("headerLayout")
-        if (headerLayout != null && headerLayout.childCount >= 2) {
-            val tvWeekRange = headerLayout.getChildAt(1) as? TextView
-            tvWeekRange?.text = getCurrentWeekRangeText()
-        }
+        val tvWeekRange = findViewSafely<TextView>("tvWeekRange")
+        val startCal = currentWeekCalendar.clone() as Calendar
+        val endCal = currentWeekCalendar.clone() as Calendar
+        endCal.add(Calendar.DAY_OF_WEEK, 6)
+
+        val startSdf = SimpleDateFormat("M월 d일", Locale.KOREA)
+        val textStr = "${startSdf.format(startCal.time)} - ${startSdf.format(endCal.time)}"
+
+        tvWeekRange?.text = textStr
+    }
+
+    private fun getSelectedWeekStartDate(): String {
+        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.KOREA)
+        return sdf.format(currentWeekCalendar.time)
+    }
+
+    private fun getSelectedWeekSundayDeadline(): String {
+        val cal = currentWeekCalendar.clone() as Calendar
+        cal.add(Calendar.DAY_OF_WEEK, 6)
+        val sdf = SimpleDateFormat("yyyy-MM-dd'T'23:59:59", Locale.KOREA)
+        return sdf.format(cal.time)
     }
 
     private fun loadWeeklySchedulesFromServer() {
@@ -97,7 +131,7 @@ class MainActivity : AppCompatActivity() {
                 try {
                     val response = ApiClient.service.getWeeklySchedules(
                         userId = 1L,
-                        weekStartDate = getCurrentWeekStartDate()
+                        weekStartDate = getSelectedWeekStartDate()
                     )
 
                     Log.d("SERVER_RESPONSE", "주간 조회 fixed: ${response.fixedSchedules.size}, generated: ${response.generatedSchedules.size}")
@@ -114,14 +148,23 @@ class MainActivity : AppCompatActivity() {
                         renderGeneratedScheduleCard(gen)
                     }
 
-                    // 서버 DB의 Task 목록 안전 복원 연동
                     try {
                         val tasks = ApiClient.service.getTasks(userId = 1L)
-                        Log.d("TASK_RESPONSE", "서버 수신 Task 개수: ${tasks.size}")
+                        val selectedSundayDate = getSelectedWeekSundayDeadline().split("T")[0]
 
+                        todoList.clear()
                         if (tasks.isNotEmpty()) {
-                            todoList.clear()
-                            tasks.forEach { task ->
+                            val weeklyTasks = tasks.filter { task ->
+                                task.deadline?.contains(selectedSundayDate) == true || task.deadline == null
+                            }
+
+                            weeklyTasks.forEach { task ->
+                                val priorityText = when (task.priority) {
+                                    1 -> "높음"
+                                    2 -> "중"
+                                    3 -> "낮음"
+                                    else -> "중"
+                                }
                                 todoList.add(
                                     Todo(
                                         id = task.taskId?.toString() ?: java.util.UUID.randomUUID().toString(),
@@ -129,19 +172,19 @@ class MainActivity : AppCompatActivity() {
                                         deadlineType = "DATE",
                                         specificScheduleName = null,
                                         expectedTime = task.estimatedMinutes / 60,
-                                        priority = if (task.priority == 1) "높음" else "중",
+                                        priority = priorityText,
                                         desiredSteps = task.desiredSteps,
                                         subSteps = emptyList()
                                     )
                                 )
                             }
-                            if (::todoAdapter.isInitialized) todoAdapter.notifyDataSetChanged()
                         }
+                        if (::todoAdapter.isInitialized) todoAdapter.notifyDataSetChanged()
                     } catch (taskEx: Exception) {
                         Log.e("TASK_FETCH_EX", "getTasks 불러오기 예외: ${taskEx.message}")
                     }
 
-                    Toast.makeText(this@MainActivity, "주간 일정을 불러왔습니다! ✨", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "일정을 불러왔습니다! ✨", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
                     e.printStackTrace()
                     Toast.makeText(this@MainActivity, "일정 조회 실패: 네트워크 연결을 확인하세요.", Toast.LENGTH_SHORT).show()
@@ -160,13 +203,26 @@ class MainActivity : AppCompatActivity() {
         simulateServerLoading("AI 일정을 생성하고 있습니다...") {
             lifecycleScope.launch {
                 try {
-                    Log.d("AI_CALL", "백엔드 AI 스케줄링 API(generateSchedules) Query Param으로 호출")
-                    val response = ApiClient.service.generateSchedules(userId = 1L)
+                    val currentWeekStart = getSelectedWeekStartDate()
+                    Log.d("AI_CALL", "백엔드 AI 스케줄링 API(generateSchedules) - 대상 주차: $currentWeekStart")
 
-                    Log.d("AI_RESPONSE", "AI 정렬 fixed: ${response.fixedSchedules.size}, generated: ${response.generatedSchedules.size}")
+                    val apiResponse = ApiClient.service.generateSchedules(
+                        GenerateScheduleApiRequest(
+                            userId = 1L,
+                            weekStartDate = currentWeekStart
+                        )
+                    )
 
-                    currentGeneratedSchedules = response.generatedSchedules
-                    handleGeneratedSchedulesResponse(response)
+                    if (apiResponse.isSuccessful) {
+                        val updatedWeekly = ApiClient.service.getWeeklySchedules(
+                            userId = 1L,
+                            weekStartDate = currentWeekStart
+                        )
+                        currentGeneratedSchedules = updatedWeekly.generatedSchedules
+                        handleGeneratedSchedulesResponse(updatedWeekly)
+                    } else {
+                        Toast.makeText(this@MainActivity, "AI 일정 생성 실패 (서버 오류)", Toast.LENGTH_SHORT).show()
+                    }
 
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -199,13 +255,24 @@ class MainActivity : AppCompatActivity() {
             tvAiFeedback?.text = "🤖 정리할 AI 일정을 찾을 수 없습니다."
         }
 
-        // 🚀 [핵심 추가] AI 스케줄링 완료 직후 하단 '이번주 할 일' 목록도 서버에서 동시에 당겨와 갱신합니다!
         lifecycleScope.launch {
             try {
                 val tasks = ApiClient.service.getTasks(userId = 1L)
+                val selectedSundayDate = getSelectedWeekSundayDeadline().split("T")[0]
+
+                todoList.clear()
                 if (tasks.isNotEmpty()) {
-                    todoList.clear()
-                    tasks.forEach { task ->
+                    val weeklyTasks = tasks.filter { task ->
+                        task.deadline?.contains(selectedSundayDate) == true || task.deadline == null
+                    }
+
+                    weeklyTasks.forEach { task ->
+                        val priorityText = when (task.priority) {
+                            1 -> "높음"
+                            2 -> "중"
+                            3 -> "낮음"
+                            else -> "중"
+                        }
                         todoList.add(
                             Todo(
                                 id = task.taskId?.toString() ?: java.util.UUID.randomUUID().toString(),
@@ -213,30 +280,52 @@ class MainActivity : AppCompatActivity() {
                                 deadlineType = "DATE",
                                 specificScheduleName = null,
                                 expectedTime = task.estimatedMinutes / 60,
-                                priority = if (task.priority == 1) "높음" else "중",
+                                priority = priorityText,
                                 desiredSteps = task.desiredSteps,
                                 subSteps = emptyList()
                             )
                         )
                     }
-                    if (::todoAdapter.isInitialized) todoAdapter.notifyDataSetChanged()
                 }
+                if (::todoAdapter.isInitialized) todoAdapter.notifyDataSetChanged()
             } catch (e: Exception) {
                 Log.e("TASK_SYNC_EX", "자동정렬 후 Task 동기화 실패: ${e.message}")
             }
         }
     }
 
+    private fun calculateCardHeightDp(startTimeStr: String, endTimeStr: String): Int {
+        try {
+            val format = SimpleDateFormat("yyyy-MM-dd'T'HH:mm", Locale.KOREA)
+            val startDate = format.parse(startTimeStr.substring(0, 16))
+            val endDate = format.parse(endTimeStr.substring(0, 16))
+
+            if (startDate != null && endDate != null) {
+                val diffMinutes = ((endDate.time - startDate.time) / (1000 * 60)).toInt()
+                return when {
+                    diffMinutes <= 30 -> 44
+                    diffMinutes <= 60 -> 68
+                    diffMinutes <= 90 -> 100
+                    diffMinutes <= 120 -> 130
+                    else -> 160
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return 56
+    }
 
     private fun renderFixedScheduleCard(fixed: FixedScheduleDto) {
         val dayKey = convertDayToKey(fixed.repeatDay ?: fixed.startTime)
         val container = findViewSafely<LinearLayout>("container$dayKey") ?: return
+        val cardHeightDp = calculateCardHeightDp(fixed.startTime, fixed.endTime)
 
         val card = CardView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dpToPx(50)
-            ).apply { setMargins(dpToPx(2), dpToPx(4), dpToPx(2), dpToPx(4)) }
+                dpToPx(cardHeightDp)
+            ).apply { setMargins(dpToPx(1), dpToPx(3), dpToPx(1), dpToPx(3)) }
             radius = dpToPx(8).toFloat()
             cardElevation = 0f
             setCardBackgroundColor(Color.parseColor("#E0E0E0"))
@@ -252,7 +341,7 @@ class MainActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT)
             text = "[고정]\n${fixed.title}"
             setTextColor(Color.parseColor("#424242"))
-            textSize = 10f
+            textSize = 9.5f
             gravity = Gravity.CENTER
         }
         card.addView(tv)
@@ -261,16 +350,29 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderGeneratedScheduleCard(gen: GeneratedScheduleDto) {
+        val selectedWeekStart = getSelectedWeekStartDate()
+        val selectedSundayDate = getSelectedWeekSundayDeadline().split("T")[0]
+
+        val cardDate = if (gen.startTime.contains("T")) gen.startTime.split("T")[0] else gen.startTime
+
+        if (cardDate.isNotEmpty() && cardDate.contains("-")) {
+            if (cardDate < selectedWeekStart || cardDate > selectedSundayDate) {
+                return
+            }
+        }
+
         val dayKey = convertDayToKey(gen.startTime)
         val container = findViewSafely<LinearLayout>("container$dayKey") ?: return
+
+        val cardHeightDp = calculateCardHeightDp(gen.startTime, gen.endTime)
 
         val cardBgColor = if (gen.completed) "#4CAF50" else if (gen.locked) "#1A237E" else "#283593"
 
         val card = CardView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dpToPx(48)
-            ).apply { setMargins(dpToPx(2), dpToPx(4), dpToPx(2), dpToPx(4)) }
+                dpToPx(cardHeightDp)
+            ).apply { setMargins(dpToPx(1), dpToPx(3), dpToPx(1), dpToPx(3)) }
             radius = dpToPx(8).toFloat()
             cardElevation = 2f
             setCardBackgroundColor(Color.parseColor(cardBgColor))
@@ -289,9 +391,10 @@ class MainActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT)
             val lockTag = if (gen.locked) "🔒 " else ""
             val doneTag = if (gen.completed) "✔ " else ""
-            text = "$doneTag$lockTag${gen.title}\n(AI 추천)"
+
+            text = "$doneTag$lockTag${gen.title}"
             setTextColor(Color.WHITE)
-            textSize = 10f
+            textSize = 9.5f
             gravity = Gravity.CENTER
         }
         card.addView(tv)
@@ -330,36 +433,8 @@ class MainActivity : AppCompatActivity() {
         startTime: String? = null,
         endTime: String? = null
     ) {
-        simulateServerLoading("변경된 일정을 반영하고 있습니다...") {
-            lifecycleScope.launch {
-                try {
-                    val requestDto = UpdateScheduleStatusApiRequest(
-                        taskId = taskId,
-                        blockId = blockId,
-                        locked = locked,
-                        completed = completed,
-                        startTime = startTime,
-                        endTime = endTime
-                    )
-
-                    Log.d("DRAG_CHECK_REQ", "전송 DTO: $requestDto")
-
-                    ApiClient.service.updateScheduleStatus(requestDto)
-                    Log.d("DRAG_CHECK_RES", "서버 응답 성공")
-
-                    Toast.makeText(this@MainActivity, "일정 위치가 저장되었습니다! ✨", Toast.LENGTH_SHORT).show()
-
-                    Handler(Looper.getMainLooper()).postDelayed({
-                        loadWeeklySchedulesFromServer()
-                    }, 300)
-
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    Log.e("DRAG_CHECK_EX", "통신 에러: ${e.message}")
-                    Toast.makeText(this@MainActivity, "저장 실패: 네트워크 연결 확인", Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
+        Log.d("DRAG_MOVE", "이동 완료: taskId=$taskId, blockId=$blockId, startTime=$startTime")
+        Toast.makeText(this@MainActivity, "일정 위치가 조정되었습니다! 📌", Toast.LENGTH_SHORT).show()
     }
 
     private fun showAddTodoBottomSheet() {
@@ -430,11 +505,22 @@ class MainActivity : AppCompatActivity() {
 
             val expectedMinutes = if (expectedTimeStr.isEmpty()) 120 else expectedTimeStr.toInt() * 60
 
+            val priorityText = when (selectedPriorityInt) {
+                1 -> "높음"
+                2 -> "중"
+                3 -> "낮음"
+                else -> "중"
+            }
+
+            val sundayDeadline = getSelectedWeekSundayDeadline()
+
             val apiRequest = CreateTaskApiRequest(
+                userId = 1L,
                 title = todoName,
+                deadline = sundayDeadline,
                 estimatedMinutes = expectedMinutes,
-                deadline = getCurrentFormattedDateTime(endOfDay = true),
                 priority = selectedPriorityInt,
+                useAiDecomposition = (desiredSteps > 0),
                 desiredSteps = desiredSteps
             )
 
@@ -443,24 +529,27 @@ class MainActivity : AppCompatActivity() {
             simulateServerLoading("할 일을 등록하는 중입니다...") {
                 lifecycleScope.launch {
                     try {
-                        val response = ApiClient.service.createTask(userId = 1L, request = apiRequest)
+                        val response = ApiClient.service.createTask(request = apiRequest)
 
                         if (response.isSuccessful) {
-                            // 🚀 [수정] 시간표에 자동정렬을 즉시 수행하지 않고, 하단 '이번 주 할 일' 목록에만 반영합니다!
                             val newTodo = Todo(
                                 id = java.util.UUID.randomUUID().toString(),
                                 name = apiRequest.title,
                                 deadlineType = "DATE",
                                 specificScheduleName = null,
                                 expectedTime = expectedMinutes / 60,
-                                priority = if (selectedPriorityInt == 1) "높음" else "중",
+                                priority = priorityText,
                                 desiredSteps = apiRequest.desiredSteps,
                                 subSteps = emptyList()
                             )
                             todoList.add(newTodo)
                             if (::todoAdapter.isInitialized) todoAdapter.notifyDataSetChanged()
 
-                            Toast.makeText(this@MainActivity, "'${apiRequest.title}' 등록 완료! '✨ 자동정렬' 버튼을 누르면 시간표에 배치됩니다.", Toast.LENGTH_LONG).show()
+                            Toast.makeText(
+                                this@MainActivity,
+                                "'${apiRequest.title}' 등록 완료!",
+                                Toast.LENGTH_SHORT
+                            ).show()
                         } else {
                             Toast.makeText(this@MainActivity, "저장 실패 (서버 응답 오류)", Toast.LENGTH_SHORT).show()
                         }
@@ -475,6 +564,7 @@ class MainActivity : AppCompatActivity() {
         bottomSheetDialog.show()
     }
 
+    // 🚀 [수정] 복수 요일 선택 및 입력 시간(HH:mm) 정확 보정 등록 로직
     private fun showFixedScheduleBottomSheet() {
         val bottomSheetDialog = BottomSheetDialog(this)
         val view = layoutInflater.inflate(R.layout.bottom_sheet_fixed_schedule, null)
@@ -490,37 +580,100 @@ class MainActivity : AppCompatActivity() {
         val etEndTime = findInView<EditText>("etEndTime")
         val btnRegister = findInView<Button>("btnRegister")
 
-        var selectedDay = "MON"
+        val btnMon = findInView<Button>("btnDayMon") ?: findInView<Button>("btnMon")
+        val btnTue = findInView<Button>("btnDayTue") ?: findInView<Button>("btnTue")
+        val btnWed = findInView<Button>("btnDayWed") ?: findInView<Button>("btnWed")
+        val btnThu = findInView<Button>("btnDayThu") ?: findInView<Button>("btnThu")
+        val btnFri = findInView<Button>("btnDayFri") ?: findInView<Button>("btnFri")
+        val btnSat = findInView<Button>("btnDaySat") ?: findInView<Button>("btnSat")
+        val btnSun = findInView<Button>("btnDaySun") ?: findInView<Button>("btnSun")
+
+        val dayButtons = listOf(
+            btnMon?.let { it to "MON" },
+            btnTue?.let { it to "TUE" },
+            btnWed?.let { it to "WED" },
+            btnThu?.let { it to "THU" },
+            btnFri?.let { it to "FRI" },
+            btnSat?.let { it to "SAT" },
+            btnSun?.let { it to "SUN" }
+        ).filterNotNull()
+
+        // 🚀 복수 요일 선택을 위한 집합 (Set)
+        val selectedDays = mutableSetOf<String>("MON")
+
+        dayButtons.forEach { (btn, dayCode) ->
+            btn.setOnClickListener {
+                if (selectedDays.contains(dayCode)) {
+                    if (selectedDays.size > 1) { // 최소 1개는 선택 유지
+                        selectedDays.remove(dayCode)
+                        btn.setBackgroundColor(Color.parseColor("#D1D1D6"))
+                        btn.setTextColor(Color.parseColor("#333333"))
+                    }
+                } else {
+                    selectedDays.add(dayCode)
+                    btn.setBackgroundColor(Color.parseColor("#283593"))
+                    btn.setTextColor(Color.WHITE)
+                }
+            }
+        }
+
+        // 입력된 시간 텍스트 정규화 ("9:00" -> "09:00:00")
+        fun formatTimeString(rawTime: String, defaultTime: String): String {
+            val trimmed = rawTime.trim()
+            if (trimmed.isEmpty()) return "$defaultTime:00"
+            val parts = trimmed.split(":")
+            return when (parts.size) {
+                1 -> {
+                    val hour = parts[0].padStart(2, '0')
+                    "$hour:00:00"
+                }
+                2 -> {
+                    val hour = parts[0].padStart(2, '0')
+                    val min = parts[1].padStart(2, '0')
+                    "$hour:$min:00"
+                }
+                else -> "$defaultTime:00"
+            }
+        }
 
         btnRegister?.setOnClickListener {
             val name = etScheduleName?.text?.toString()?.trim() ?: ""
-            val startTime = etStartTime?.text?.toString()?.trim() ?: "10:00"
-            val endTime = etEndTime?.text?.toString()?.trim() ?: "12:00"
+            val rawStartTime = etStartTime?.text?.toString() ?: ""
+            val rawEndTime = etEndTime?.text?.toString() ?: ""
 
             if (name.isEmpty()) {
                 Toast.makeText(this, "일정 이름을 입력해 주세요!", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
 
-            val targetDayIso = convertDayToIsoDate(selectedDay)
-            val baseDate = targetDayIso.split("T")[0]
-
-            val apiRequest = CreateFixedScheduleApiRequest(
-                title = name,
-                startTime = "${baseDate}T$startTime:00",
-                endTime = "${baseDate}T$endTime:00",
-                repeatDay = selectedDay
-            )
+            val formattedStartTime = formatTimeString(rawStartTime, "10:00")
+            val formattedEndTime = formatTimeString(rawEndTime, "12:00")
 
             bottomSheetDialog.dismiss()
 
             simulateServerLoading("고정 일정을 저장하는 중입니다...") {
                 lifecycleScope.launch {
                     try {
-                        val response = ApiClient.service.createFixedSchedule(userId = 1L, request = apiRequest)
+                        var successCount = 0
+                        // 🚀 선택된 여러 요일에 대해 각각 생성 API 호출
+                        selectedDays.forEach { dayCode ->
+                            val targetDayIso = convertDayToIsoDate(dayCode)
+                            val baseDate = targetDayIso.split("T")[0]
 
-                        if (response.isSuccessful) {
-                            Toast.makeText(this@MainActivity, "[${apiRequest.repeatDay}] '${apiRequest.title}' 등록 완료!", Toast.LENGTH_SHORT).show()
+                            val apiRequest = CreateFixedScheduleApiRequest(
+                                userId = 1L,
+                                title = name,
+                                startTime = "${baseDate}T$formattedStartTime",
+                                endTime = "${baseDate}T$formattedEndTime",
+                                repeatDay = dayCode
+                            )
+
+                            val response = ApiClient.service.createFixedSchedule(request = apiRequest)
+                            if (response.isSuccessful) successCount++
+                        }
+
+                        if (successCount > 0) {
+                            Toast.makeText(this@MainActivity, "'$name' 고정 일정 ${successCount}개 요일 등록 완료! ✨", Toast.LENGTH_SHORT).show()
                             loadWeeklySchedulesFromServer()
                         } else {
                             Toast.makeText(this@MainActivity, "등록 실패 (서버 응답 오류)", Toast.LENGTH_SHORT).show()
@@ -608,7 +761,7 @@ class MainActivity : AppCompatActivity() {
         if (!isAlreadyExist) {
             val newCard = CardView(this).apply {
                 layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(48)).apply {
-                    setMargins(dpToPx(2), dpToPx(4), dpToPx(2), dpToPx(4))
+                    setMargins(dpToPx(1), dpToPx(3), dpToPx(1), dpToPx(3))
                 }
                 radius = dpToPx(8).toFloat()
                 cardElevation = 2f
@@ -624,7 +777,7 @@ class MainActivity : AppCompatActivity() {
                 layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT)
                 text = "${change.title}\n(AI 추천)"
                 setTextColor(Color.WHITE)
-                textSize = 10f
+                textSize = 9.5f
                 gravity = Gravity.CENTER
             }
             newCard.addView(newTextView)
@@ -653,7 +806,6 @@ class MainActivity : AppCompatActivity() {
         }
         rootLayout.addView(tvSubTitle)
 
-        // 세부 AI 일정 명칭 매핑 로직 강화 (단어 매핑 및 taskId 비교 포함)
         val matchedSchedules = if (todo.subSteps.isNotEmpty()) {
             emptyList()
         } else {
@@ -696,14 +848,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun convertDayToKey(rawDayStr: String): String {
-        if (rawDayStr.contains("-") && rawDayStr.contains("T")) {
+        if (rawDayStr.isEmpty()) return "Mon"
+
+        if (rawDayStr.contains("-")) {
             try {
                 val datePart = rawDayStr.split("T")[0]
-                val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.KOREA)
-                val date = sdf.parse(datePart)
-                if (date != null) {
-                    val cal = Calendar.getInstance()
-                    cal.time = date
+                val parts = datePart.split("-")
+                if (parts.size == 3) {
+                    val year = parts[0].toInt()
+                    val month = parts[1].toInt() - 1
+                    val day = parts[2].toInt()
+
+                    val cal = Calendar.getInstance().apply {
+                        set(year, month, day)
+                    }
+
                     return when (cal.get(Calendar.DAY_OF_WEEK)) {
                         Calendar.MONDAY -> "Mon"
                         Calendar.TUESDAY -> "Tue"
@@ -732,28 +891,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun getCurrentWeekRangeText(): String {
-        val calendar = Calendar.getInstance()
-        calendar.firstDayOfWeek = Calendar.MONDAY
-
-        calendar.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
-        val startSdf = SimpleDateFormat("M월 d일", Locale.KOREA)
-        val startDateStr = startSdf.format(calendar.time)
-
-        calendar.add(Calendar.DAY_OF_WEEK, 6)
-        val endDateStr = startSdf.format(calendar.time)
-
-        return "$startDateStr - $endDateStr"
-    }
-
-    private fun getCurrentWeekStartDate(): String {
-        val calendar = Calendar.getInstance()
-        calendar.firstDayOfWeek = Calendar.MONDAY
-        calendar.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
-        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.KOREA)
-        return sdf.format(calendar.time)
-    }
-
     private fun getCurrentFormattedDateTime(endOfDay: Boolean = false): String {
         val calendar = Calendar.getInstance()
         val dateSdf = SimpleDateFormat("yyyy-MM-dd", Locale.KOREA)
@@ -762,8 +899,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun convertDayToIsoDate(dayKey: String): String {
-        val calendar = Calendar.getInstance()
-        calendar.firstDayOfWeek = Calendar.MONDAY
+        val calendar = currentWeekCalendar.clone() as Calendar
 
         val targetDayOfWeek = when (dayKey) {
             "MON" -> Calendar.MONDAY
