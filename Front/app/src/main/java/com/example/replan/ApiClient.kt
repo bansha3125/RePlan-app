@@ -15,12 +15,7 @@ import java.util.concurrent.TimeUnit
 // =========================================================================
 // DTO 데이터 클래스
 // =========================================================================
-data class ReplanScheduleApiRequest(
-    val userId: Long,
-    val replanFromTime: String,
-    val completedTaskIds: List<Long> = emptyList(),
-    val postponedTaskIds: List<Long> = emptyList()
-)
+
 
 // =========================================================================
 // 백엔드 API 서비스 인터페이스
@@ -98,10 +93,8 @@ interface ScheduleApiService {
 // =========================================================================
 object ApiClient {
 
-    /**
-     * Android 에뮬레이터에서 PC의 localhost:8080으로 접근하는 주소
-     */
-    private const val BASE_URL = "http://10.0.2.2:8080/"
+    // ngrok URL 설정 (반드시 http:// 또는 https:// 포함 및 끝에 / 필요)
+    private const val BASE_URL = "https://darci-jaggiest-intendedly.ngrok-free.dev/"
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
         level = HttpLoggingInterceptor.Level.BODY
