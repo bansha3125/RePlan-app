@@ -28,7 +28,6 @@ interface ScheduleApiService {
      */
     @GET("schedules/weekly")
     suspend fun getWeeklySchedules(
-<<<<<<<< HEAD:app/src/main/java/com/example/replan/ApiClient.kt
         @Query("userId") userId: Long = 1L,
         @Query("weekStartDate") weekStartDate: String? = null
     ): WeeklyScheduleResponse
@@ -47,37 +46,11 @@ interface ScheduleApiService {
      */
     @POST("schedules/replan")
     suspend fun replanSchedules(
-        @Body request: ReplanApiRequest
-    ): Response<ResponseBody>
-
-    /**
-     * 등록된 할 일 목록 조회 API (GET /schedules/tasks)
-========
-        @Query("userId") userId: Long = 1L
-    ): WeeklyScheduleResponse
-
-    /**
-     * AI 일정 자동 생성
-     * POST /schedules/generate
-     */
-    @POST("schedules/generate")
-    suspend fun generateSchedules(
-        @Body request: GenerateScheduleApiRequest
-    ): Response<ResponseBody>
-
-    /**
-     * AI 일정 재배치
-     * POST /schedules/replan
-     */
-    @POST("schedules/replan")
-    suspend fun replanSchedules(
         @Body request: ReplanScheduleApiRequest
     ): Response<ResponseBody>
 
     /**
-     * 등록된 할 일 목록 조회
-     * GET /schedules/tasks?userId=1
->>>>>>>> 670d784125d9e940ea9a6780ef12e3a9379eeb95:Front/app/src/main/java/com/example/replan/ApiClient.kt
+     * 등록된 할 일 목록 조회 API (GET /schedules/tasks)
      */
     @GET("schedules/tasks")
     suspend fun getTasks(
@@ -103,12 +76,7 @@ interface ScheduleApiService {
     ): Response<ResponseBody>
 
     /**
-<<<<<<<< HEAD:app/src/main/java/com/example/replan/ApiClient.kt
      * 고정 일정 목록 조회 API (GET /schedules/fixed-schedules)
-========
-     * 일정 상태 업데이트
-     * POST /schedules/status
->>>>>>>> 670d784125d9e940ea9a6780ef12e3a9379eeb95:Front/app/src/main/java/com/example/replan/ApiClient.kt
      */
     @GET("schedules/fixed-schedules")
     suspend fun getFixedSchedules(
