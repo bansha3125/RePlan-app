@@ -130,12 +130,8 @@ class MainActivity : AppCompatActivity() {
             lifecycleScope.launch {
                 try {
                     val response = ApiClient.service.getWeeklySchedules(
-<<<<<<<< HEAD:app/src/main/java/com/example/replan/MainActivity.kt
                         userId = 1L,
                         weekStartDate = getSelectedWeekStartDate()
-========
-                        userId = 1L
->>>>>>>> 670d784125d9e940ea9a6780ef12e3a9379eeb95:Front/app/src/main/java/com/example/replan/MainActivity.kt
                     )
 
                     Log.d("SERVER_RESPONSE", "주간 조회 fixed: ${response.fixedSchedules.size}, generated: ${response.generatedSchedules.size}")
@@ -207,7 +203,6 @@ class MainActivity : AppCompatActivity() {
         simulateServerLoading("AI 일정을 생성하고 있습니다...") {
             lifecycleScope.launch {
                 try {
-<<<<<<<< HEAD:app/src/main/java/com/example/replan/MainActivity.kt
                     val currentWeekStart = getSelectedWeekStartDate()
                     Log.d("AI_CALL", "백엔드 AI 스케줄링 API(generateSchedules) - 대상 주차: $currentWeekStart")
 
@@ -227,49 +222,6 @@ class MainActivity : AppCompatActivity() {
                         handleGeneratedSchedulesResponse(updatedWeekly)
                     } else {
                         Toast.makeText(this@MainActivity, "AI 일정 생성 실패 (서버 오류)", Toast.LENGTH_SHORT).show()
-========
-                    Log.d(
-                        "AI_CALL",
-                        "백엔드 AI 스케줄링 API(generateSchedules) Request Body로 호출"
-                    )
-
-                    val generateResponse = ApiClient.service.generateSchedules(
-                        request = GenerateScheduleApiRequest(
-                            userId = 1L
-                        )
-                    )
-
-                    if (generateResponse.isSuccessful) {
-
-                        Log.d(
-                            "AI_RESPONSE",
-                            "AI 일정 생성 성공: HTTP ${generateResponse.code()}"
-                        )
-
-                        // 생성 API는 성공 메시지만 반환하므로
-                        // 실제 생성 일정을 다시 조회한다.
-                        val weeklyResponse = ApiClient.service.getWeeklySchedules(
-                            userId = 1L
-                        )
-
-                        Log.d(
-                            "AI_RESPONSE",
-                            "AI 정렬 fixed: ${weeklyResponse.fixedSchedules.size}, " +
-                                    "generated: ${weeklyResponse.generatedSchedules.size}"
-                        )
-
-                        currentGeneratedSchedules = weeklyResponse.generatedSchedules
-
-                        handleGeneratedSchedulesResponse(weeklyResponse)
-
-                    } else {
-
-                        Log.e(
-                            "AI_RESPONSE",
-                            "AI 일정 생성 실패: HTTP ${generateResponse.code()}, " +
-                                    "error=${generateResponse.errorBody()?.string()}"
-                        )
->>>>>>>> 670d784125d9e940ea9a6780ef12e3a9379eeb95:Front/app/src/main/java/com/example/replan/MainActivity.kt
                     }
 
                 } catch (e: Exception) {
