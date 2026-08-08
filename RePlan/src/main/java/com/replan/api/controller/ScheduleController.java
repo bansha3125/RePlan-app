@@ -54,8 +54,17 @@ public class ScheduleController {
 
     @PostMapping("/generate")
     public String generateAiSchedule(@RequestBody java.util.Map<String, Object> requestBody) {
-        Long userId = Long.valueOf(requestBody.get("userId").toString());
-        scheduleService.generateAiSchedule(userId);
+        Object userIdObj = requestBody.get("userId");
+        if (userIdObj == null) {
+            throw new IllegalArgumentException("요청 본문에 userId가 포함되어 있지 않습니다.");
+        }
+        Long userId = Long.valueOf(userIdObj.toString());
+
+        String weekStartDate = requestBody.get("weekStartDate") != null
+                ? requestBody.get("weekStartDate").toString()
+                : null;
+
+        scheduleService.generateAiSchedule(userId, weekStartDate);
         return "AI 스케줄 생성 및 DB 저장 요청 완료!";
     }
 
