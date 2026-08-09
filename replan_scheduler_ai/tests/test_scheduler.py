@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 
 from ai_scheduler.models import CalendarBlock, SchedulePreferences, Task
 from ai_scheduler.scheduler import (
@@ -240,6 +240,104 @@ class SchedulerTests(unittest.TestCase):
         result = replan_after_postpone("a", tasks, [], PREF, NOW)
         self.assertEqual(result.scores["a"].postponement, 10.0)
 
+
+    def test_task_uses_gap_before_fixed_schedule(self):
+        """
+        앞쪽 빈 시간이 존재하면 마지막 고정 일정 뒤로 밀리지 않고
+        앞쪽 빈 슬롯을 사용하는지 확인한다.
+        """
+
+        test_date = (datetime.now() + timedelta(days=1)).date()
+
+        now = datetime.combine(
+            test_date,
+            time(9, 0),
+        )
+
+        task = Task(
+            id="gap-test-1",
+            title="발표 자료 조사",
+            estimated_minutes=60,
+            deadline=datetime.combine(
+                test_date,
+                time(18, 0),
+            ),
+            priority=1,
+            difficulty=2,
+            focus_required=2,
+        )
+
+        fixed_schedules = [
+            CalendarBlock(
+                block_id="fixed-1",
+                title="오전 수업",
+                start=datetime.combine(
+                    test_date,
+                    time(11, 0),
+                ),
+                end=datetime.combine(
+                    test_date,
+                    time(12, 0),
+                ),
+                source="fixed",
+                locked=True,
+            ),
+            CalendarBlock(
+                block_id="fixed-2",
+                title="오후 수업",
+                start=datetime.combine(
+                    test_date,
+                    time(15, 0),
+                ),
+                end=datetime.combine(
+                    test_date,
+                    time(16, 0),
+                ),
+                source="fixed",
+                locked=True,
+            ),
+        ]
+
+        preferences = SchedulePreferences(
+            day_start=time(9, 0),
+            day_end=time(22, 0),
+            focus_start=time(9, 0),
+            focus_end=time(12, 0),
+        )
+
+        result = schedule_tasks(
+            tasks=[task],
+            existing_blocks=fixed_schedules,
+            preferences=preferences,
+            now=now,
+        )
+
+        self.assertGreater(
+            len(result.blocks),
+            0,
+            "일정이 생성되지 않았습니다.",
+        )
+
+        generated = result.blocks[0]
+
+        print(
+            "\n배치 결과:",
+            generated.start.strftime("%H:%M"),
+            "~",
+            generated.end.strftime("%H:%M"),
+        )
+
+        self.assertLessEqual(
+            generated.end,
+            datetime.combine(
+                test_date,
+                time(11, 0),
+            ),
+            msg=(
+                "앞쪽 빈 공간이 있는데 뒤쪽에 배치되었습니다: "
+                f"{generated.start} ~ {generated.end}"
+            ),
+        )
 
 if __name__ == "__main__":
     unittest.main()

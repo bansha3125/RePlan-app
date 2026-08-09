@@ -260,19 +260,44 @@ def _candidate_quality(
     search_start: datetime,
     preferences: SchedulePreferences,
 ) -> float:
-    in_focus = _is_in_focus_window(candidate_start, candidate_end, preferences)
+    in_focus = _is_in_focus_window(
+        candidate_start,
+        candidate_end,
+        preferences,
+    )
 
+    # 집중도가 높은 작업만 집중 시간대를 강하게 선호
     if task.focus_required >= 4:
-        focus_match = 35.0 if in_focus else 0.0
-    elif task.focus_required <= 2:
-        focus_match = 12.0 if not in_focus else 0.0
-    else:
-        focus_match = 8.0 if in_focus else 4.0
+        focus_match = 15.0 if in_focus else 0.0
 
-    difficulty_match = 10.0 if task.difficulty >= 4 and in_focus else 0.0
-    hours_from_start = (candidate_start - search_start).total_seconds() / 3600
-    early_bonus = max(0.0, 20.0 - hours_from_start * 0.08)
-    return focus_match + difficulty_match + early_bonus
+    elif task.focus_required <= 2:
+        # 집중도가 낮다고 해서 오전 빈칸을 피하지 않도록 완화
+        focus_match = 2.0 if not in_focus else 0.0
+
+    else:
+        focus_match = 6.0 if in_focus else 3.0
+
+    difficulty_match = (
+        5.0
+        if task.difficulty >= 4 and in_focus
+        else 0.0
+    )
+
+    hours_from_start = (
+        candidate_start - search_start
+    ).total_seconds() / 3600
+
+    # 앞쪽 빈 시간을 훨씬 적극적으로 선호
+    early_bonus = max(
+        0.0,
+        30.0 - hours_from_start * 2.0
+    )
+
+    return (
+        focus_match
+        + difficulty_match
+        + early_bonus
+    )
 
 
 def _find_best_candidate(
