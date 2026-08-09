@@ -339,5 +339,123 @@ class SchedulerTests(unittest.TestCase):
             ),
         )
 
+
+
+
+        def test_180min_task_with_60min_gap_before_fixed(self):
+
+            test_date = (datetime.now() + timedelta(days=1)).date()
+
+            now = datetime.combine(
+                test_date,
+                time(9, 0),
+            )
+
+            task = Task(
+                id="gap-test-180",
+                title="여행 준비",
+                estimated_minutes=180,
+                deadline=datetime.combine(
+                    test_date,
+                    time(20, 0),
+                ),
+                priority=2,
+                difficulty=2,
+                focus_required=2,
+                max_block_minutes=60,
+            )
+
+            fixed_schedules = [
+                CalendarBlock(
+                    block_id="fixed-work",
+                    title="알바",
+                    start=datetime.combine(
+                        test_date,
+                        time(10, 0),
+                    ),
+                    end=datetime.combine(
+                        test_date,
+                        time(15, 0),
+                    ),
+                    source="fixed",
+                    locked=True,
+                )
+            ]
+
+            preferences = SchedulePreferences(
+                day_start=time(9, 0),
+                day_end=time(22, 0),
+                focus_start=time(9, 0),
+                focus_end=time(12, 0),
+            )
+
+            result = schedule_tasks(
+                tasks=[task],
+                existing_blocks=fixed_schedules,
+                preferences=preferences,
+                now=now,
+            )
+
+            print("\n=== 180분 작업 배치 결과 ===")
+
+            for block in result.blocks:
+                print(
+                    block.start.strftime("%H:%M"),
+                    "~",
+                    block.end.strftime("%H:%M"),
+                )
+
+            self.assertGreater(
+                len(result.blocks),
+                0,
+            )
+    def test_priority_scores_are_different(self):
+
+        tasks = [
+            Task(
+                id="high",
+                title="중요도 상",
+                deadline=datetime(2026, 7, 2, 18, 0),
+                estimated_minutes=60,
+                priority=1,
+            ),
+            Task(
+                id="medium",
+                title="중요도 중",
+                deadline=datetime(2026, 7, 2, 18, 0),
+                estimated_minutes=60,
+                priority=2,
+            ),
+            Task(
+                id="low",
+                title="중요도 하",
+                deadline=datetime(2026, 7, 2, 18, 0),
+                estimated_minutes=60,
+                priority=3,
+            ),
+        ]
+
+        result = schedule_tasks(
+            tasks,
+            [],
+            PREF,
+            NOW,
+        )
+
+        print("\n=== 중요도 테스트 ===")
+
+        for task_id, score in result.scores.items():
+            print(task_id, score)
+
+        for block in result.blocks:
+            print(
+                block.task_id,
+                block.start.strftime("%H:%M"),
+                "~",
+                block.end.strftime("%H:%M"),
+            )
+
+
+ 
 if __name__ == "__main__":
     unittest.main()

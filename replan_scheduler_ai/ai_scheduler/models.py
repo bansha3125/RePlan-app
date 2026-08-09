@@ -25,7 +25,7 @@ class Task:
     lecture_start: Optional[datetime] = None
     splittable: bool = True
     min_block_minutes: int = 30
-    max_block_minutes: int = 90
+    max_block_minutes: int = 60
     completed_minutes: int = 0
     completed: bool = False
 
