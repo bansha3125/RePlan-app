@@ -104,8 +104,10 @@ public class ScheduleService {
                 .estimatedMinutes(request.getEstimatedMinutes())
                 .useAiDecomposition(request.isUseAiDecomposition())
                 .desiredSteps(request.getDesiredSteps())
+                .priority(request.getPriority() != null ? request.getPriority() : 2) // [수정] 전달받은 중요도 저장 (없으면 기본값 2)
                 .build());
     }
+
     @Transactional
     public void generateAiSchedule(Long userId, String weekStartDateParam) {
 
@@ -197,27 +199,48 @@ public class ScheduleService {
     private List<AiTaskRequest> buildAiTasks(Long userId) {
         return taskRepository.findByUserId(userId)
                 .stream()
-                .map(task -> AiTaskRequest.builder()
-                        .taskId(String.valueOf(task.getTaskId()))
-                        .title(task.getTitle())
-                        .estimatedMinutes(task.getEstimatedMinutes())
-                        .deadline(task.getDeadline().toString())
+                .map(task -> {
+                    // [추가] 프론트/DB의 3단계(상중하 또는 1,2,3)를 AI가 요구하는 1~5 단계로 매핑
+                    int mappedPriority = convertPriorityToAiScale(task.getPriority());
+
+                    return AiTaskRequest.builder()
+                            .taskId(String.valueOf(task.getTaskId()))
+                            .title(task.getTitle())
+                            .estimatedMinutes(task.getEstimatedMinutes())
+                            .deadline(task.getDeadline().toString())
 
                         /*
                          * AI 명세상 필수값이다.
                          * 현재 TaskRequest/Task Entity에 연결된 필드가 없어 임시 기본값 사용.
                          */
-                        .priority(DEFAULT_PRIORITY)
+                            .priority(mappedPriority) // [수정] 변환된 1~5 값 전달
 
-                        .difficulty(null)
-                        .focusRequired(null)
-                        .postponeCount(0)
-                        .completedMinutes(0)
-                        .remainingMinutes(task.getEstimatedMinutes())
-                        .completed(false)
-                        .prerequisiteTaskIds(new ArrayList<>())
-                        .build())
+                            .difficulty(task.getDifficulty())
+                            .focusRequired(task.getFocusRequired())
+                            .postponeCount(task.getPostponeCount())
+                            .completedMinutes(task.getCompletedMinutes())
+                            .remainingMinutes(task.getEstimatedMinutes())
+                            .completed(task.isCompleted())
+                            .prerequisiteTaskIds(new ArrayList<>())
+                            .build();
+                })
                 .toList();
+    }
+
+    private int convertPriorityToAiScale(Integer frontPriority) {
+        if (frontPriority == null) {
+            return 3;
+        }
+        switch (frontPriority) {
+            case 3: // 상
+                return 5;
+            case 2: // 중
+                return 3;
+            case 1: // 하
+                return 1;
+            default:
+                return frontPriority; // 이미 1~5 범위라면 그대로 반환
+        }
     }
 
     private List<AiFixedScheduleRequest> buildAiFixedSchedules(Long userId) {

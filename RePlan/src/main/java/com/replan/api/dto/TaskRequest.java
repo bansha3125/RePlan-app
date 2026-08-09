@@ -22,4 +22,6 @@ public class TaskRequest {
 
     private String deadlineType;
     private Long linkedScheduleId;
+
+    private Integer priority;
 }
