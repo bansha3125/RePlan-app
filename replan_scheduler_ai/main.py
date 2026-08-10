@@ -1,3 +1,4 @@
+from datetime import date, datetime, time
 from copy import deepcopy
 from threading import Lock
 from ai_scheduler.gemini_service import GeminiAssistant
@@ -290,13 +291,26 @@ def _request_to_internal_payload(
         existing_blocks.append(
             _convert_existing_schedule(existing)
         )
+    week_start_time = datetime.combine(
+        request.weekStartDate,
+        time(9, 0),
+    )
 
+    current_time = datetime.now().replace(
+        microsecond=0
+    )
+
+    # 현재 주를 생성하는 경우 과거 시간에 배치하지 않음
+    schedule_start = max(
+        week_start_time,
+        current_time,
+    )
     return {
         "tasks": tasks,
         "existing_blocks": existing_blocks,
 
-        # integration.py에 기본값이 있지만
-        # 현재 서비스 규칙을 명시적으로 전달
+        "now": schedule_start.isoformat(),
+
         "preferences": {
             "day_start": "09:00",
             "day_end": "22:00",
