@@ -9,7 +9,7 @@ import lombok.Setter;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
+/*
  * 백엔드가 AI 서버 POST /schedules/generate 로 전송하는 요청 DTO.
  */
 @Getter

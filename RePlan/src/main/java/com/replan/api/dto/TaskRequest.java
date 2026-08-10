@@ -3,7 +3,7 @@ package com.replan.api.dto;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-/**
+/*
  * 프론트엔드에서 일반 할 일을 생성할 때 사용하는 요청 DTO.
  *
  * 주의:

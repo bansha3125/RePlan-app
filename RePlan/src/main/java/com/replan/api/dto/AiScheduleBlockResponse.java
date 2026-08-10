@@ -6,7 +6,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-/**
+/*
  * AI 응답의 schedules, preservedSchedules, finalSchedules 공통 항목.
  */
 @Getter
