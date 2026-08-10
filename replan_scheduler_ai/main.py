@@ -1,6 +1,7 @@
+from datetime import date, datetime, time
 from copy import deepcopy
 from threading import Lock
-
+from ai_scheduler.gemini_service import GeminiAssistant
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Union
 
@@ -18,6 +19,7 @@ app = FastAPI(
     title="AI Scheduler API",
     version="1.0.0",
 )
+_gemini_service = GeminiAssistant()
 
 # =========================================================
 # 동일 requestId 중복 요청 처리
@@ -87,6 +89,9 @@ class TaskRequest(BaseModel):
 
     difficulty: Optional[int] = None
     focusRequired: Optional[int] = None
+
+    useAiDecomposition: bool = False
+    desiredSteps: Optional[int] = None
 
     postponeCount: int = 0
     completedMinutes: int = 0
@@ -225,24 +230,42 @@ def _request_to_internal_payload(
             "deadline": task.deadline.isoformat(),
             "estimated_minutes": task.estimatedMinutes,
             "priority": task.priority,
+
             "difficulty": (
                 task.difficulty
                 if task.difficulty is not None
                 else 3
             ),
+
             "focus_required": (
                 task.focusRequired
                 if task.focusRequired is not None
                 else 3
             ),
-            "postpone_count": 0,
-            "prerequisite_ids": [],
+
+            # AI 작업 분해 설정
+            "use_ai_decomposition": task.useAiDecomposition,
+            "desired_steps": (
+                task.desiredSteps
+                if task.desiredSteps is not None
+                else None
+            ),
+
+            "postpone_count": task.postponeCount,
+
+            "prerequisite_ids": [
+                str(value)
+                for value in task.prerequisiteTaskIds
+            ],
+
             "category": "기타",
             "splittable": True,
+
             "min_block_minutes": 30,
-            "max_block_minutes": 90,
-            "completed_minutes": 0,
-            "completed": False,
+            "max_block_minutes": 60,
+
+            "completed_minutes": task.completedMinutes,
+            "completed": task.completed,
         })
 
     existing_blocks = []
@@ -268,13 +291,26 @@ def _request_to_internal_payload(
         existing_blocks.append(
             _convert_existing_schedule(existing)
         )
+    week_start_time = datetime.combine(
+        request.weekStartDate,
+        time(9, 0),
+    )
 
+    current_time = datetime.now().replace(
+        microsecond=0
+    )
+
+    # 현재 주를 생성하는 경우 과거 시간에 배치하지 않음
+    schedule_start = max(
+        week_start_time,
+        current_time,
+    )
     return {
         "tasks": tasks,
         "existing_blocks": existing_blocks,
 
-        # integration.py에 기본값이 있지만
-        # 현재 서비스 규칙을 명시적으로 전달
+        "now": schedule_start.isoformat(),
+
         "preferences": {
             "day_start": "09:00",
             "day_end": "22:00",
@@ -284,6 +320,167 @@ def _request_to_internal_payload(
             "max_daily_generated_minutes": 480,
         },
     }
+
+def _expand_decomposed_tasks(
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+
+    expanded_tasks = []
+    step_metadata = {}
+
+    for task in payload.get("tasks", []):
+
+        # 쪼개기 사용 안 하는 Task는 그대로
+        if not task.get(
+            "use_ai_decomposition",
+            False,
+        ):
+            expanded_tasks.append(task)
+            continue
+
+        desired_steps = int(
+            task.get("desired_steps") or 5
+        )
+
+        desired_steps = max(
+            1,
+            min(desired_steps, 10),
+        )
+
+        decomposition_result = (
+            _gemini_service.decompose_task(
+                task_title=task["title"],
+                desired_steps=desired_steps,
+                total_estimated_minutes=int(
+                    task["estimated_minutes"]
+                ),
+            )
+        )
+
+        print(
+            "[GEMINI DECOMPOSE]",
+            "title =", task["title"],
+            "desired_steps =", desired_steps,
+            "used_fallback =", decomposition_result.used_fallback,
+            "error =", decomposition_result.error,
+        )
+
+        steps = decomposition_result.data.get(
+            "steps",
+            [],
+        )
+
+        if not steps:
+            raise ValueError(
+                f"작업 {task['id']}의 "
+                "AI 분해 결과가 없습니다."
+            )
+
+        # step order → 내부용 ID
+        step_id_by_order = {}
+
+        for step in steps:
+            order = int(step["order"])
+
+            step_id_by_order[order] = (
+                f"{task['id']}-step-{order}"
+            )
+
+        for step in steps:
+            order = int(step["order"])
+
+            child_id = step_id_by_order[
+                order
+            ]
+
+            prerequisite_ids = []
+
+            if order > 1:
+                previous_step_id = (
+                    step_id_by_order.get(order - 1)
+                )
+
+                if previous_step_id is not None:
+                    prerequisite_ids.append(
+                        previous_step_id
+                    )
+
+            child_task = deepcopy(task)
+
+            child_task.update({
+                "id": child_id,
+
+                # 실제 화면에 표시할 세부 단계명
+                "title": str(
+                    step["title"]
+                ),
+
+                "estimated_minutes": max(
+                    1,
+                    int(
+                        step[
+                            "estimated_minutes"
+                        ]
+                    ),
+                ),
+
+                "difficulty": max(
+                    1,
+                    min(
+                        int(
+                            step.get(
+                                "difficulty",
+                                3,
+                            )
+                        ),
+                        5,
+                    ),
+                ),
+
+                "focus_required": max(
+                    1,
+                    min(
+                        int(
+                            step.get(
+                                "focus_required",
+                                3,
+                            )
+                        ),
+                        5,
+                    ),
+                ),
+
+                "prerequisite_ids": (
+                    prerequisite_ids
+                ),
+
+                # 이미 Gemini가 의미 단위로
+                # 쪼갰으므로 다시 쪼개지 않음
+                "splittable": False,
+
+                "use_ai_decomposition": False,
+                "desired_steps": None,
+            })
+
+            expanded_tasks.append(
+                child_task
+            )
+
+            # 응답할 때 다시 부모 taskId로
+            # 되돌리기 위한 정보
+            step_metadata[child_id] = {
+                "parentTaskId": str(
+                    task["id"]
+                ),
+                "stepOrder": order,
+            }
+
+    result = deepcopy(payload)
+
+    result["tasks"] = expanded_tasks
+    result["step_metadata"] = step_metadata
+
+    return result
 
 def _parse_existing_datetime(
     value: Any,
@@ -439,7 +636,7 @@ def _request_to_replan_internal_payload(
             "category": "기타",
             "splittable": True,
             "min_block_minutes": 30,
-            "max_block_minutes": 90,
+            "max_block_minutes": 60,
             "completed_minutes": 0,
             "completed": False,
         })
@@ -550,6 +747,14 @@ def generate_schedule(
     try:
         internal_payload = (
             _request_to_internal_payload(request)
+        )
+
+        # AI 분해가 필요한 Task만
+        # 세부 Task로 확장
+        internal_payload = (
+            _expand_decomposed_tasks(
+                internal_payload
+            )
         )
 
         result = schedule_api_from_payload(

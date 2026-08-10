@@ -145,6 +145,545 @@ class TestAPIGenerate(BaseAPITest):
             msg=f"생성 일정이 고정 일정과 겹침: {generated_task}",
         )
 
+    def test_ai_decomposition_3_5_7(self):
 
+        from datetime import (
+            datetime,
+            timedelta,
+            time,
+        )
+
+        test_date = datetime.now().date()
+
+        week_start = (
+            test_date
+            - timedelta(
+                days=test_date.weekday()
+            )
+        )
+
+        week_end = (
+            week_start
+            + timedelta(days=6)
+        )
+
+        for desired_steps in [3, 5, 7]:
+
+            with self.subTest(
+                desired_steps=desired_steps
+            ):
+
+                body = {
+                    "requestId": (
+                        f"decompose-test-"
+                        f"{desired_steps}"
+                    ),
+
+                    "userId": 1,
+
+                    "weekStartDate": (
+                        week_start.isoformat()
+                    ),
+
+                    "weekEndDate": (
+                        week_end.isoformat()
+                    ),
+
+                    "timezone": "Asia/Seoul",
+
+                    "tasks": [
+                        {
+                            "taskId": 100,
+                            "title": (
+                                "경진대회 발표 준비"
+                            ),
+
+                            "estimatedMinutes": (
+                                desired_steps * 30
+                            ),
+
+                            "deadline": (
+                                datetime.combine(
+                                    test_date,
+                                    time(21, 0),
+                                ).isoformat()
+                            ),
+
+                            "priority": 5,
+                            "difficulty": 3,
+                            "focusRequired": 4,
+
+                            "useAiDecomposition": True,
+                            "desiredSteps": (
+                                desired_steps
+                            ),
+
+                            "postponeCount": 0,
+                            "completedMinutes": 0,
+                            "completed": False,
+                            "prerequisiteTaskIds": [],
+                        }
+                    ],
+
+                    "fixedSchedules": [],
+                    "existingSchedules": [],
+                }
+
+                response = self.client.post(
+                    "/schedules/generate",
+                    json=body,
+                )
+
+                self.assertEqual(
+                    response.status_code,
+                    200,
+                    msg=response.text,
+                )
+
+                data = response.json()
+
+                schedules = [
+                    schedule
+                    for schedule
+                    in data.get(
+                        "schedules",
+                        [],
+                    )
+                    if str(
+                        schedule.get("taskId")
+                    ) == "100"
+                ]
+
+                print(
+                    f"\n=== {desired_steps}단계 ==="
+                )
+
+                for schedule in schedules:
+                    print(
+                        schedule["stepOrder"],
+                        schedule["title"],
+                        schedule["startTime"],
+                        "~",
+                        schedule["endTime"],
+                    )
+
+                self.assertEqual(
+                    len(schedules),
+                    desired_steps,
+                    msg=data,
+                )
+
+                step_orders = sorted(
+                    schedule["stepOrder"]
+                    for schedule in schedules
+                )
+
+                self.assertEqual(
+                    step_orders,
+                    list(
+                        range(
+                            1,
+                            desired_steps + 1,
+                        )
+                    ),
+                )
+
+                self.assertTrue(
+                    all(
+                        str(
+                            schedule["blockId"]
+                        ).startswith(
+                            "generated:100:step-"
+                        )
+                        for schedule in schedules
+                    )
+                )
+
+        actual_orders = [
+            schedule["stepOrder"]
+            for schedule in schedules
+        ]
+
+        self.assertEqual(
+            actual_orders,
+            list(range(1, desired_steps + 1)),
+        )
+        
+    def test_ai_decomposition_can_scatter_across_gaps(self):
+
+        from datetime import datetime, timedelta, time
+
+        test_date = datetime.now().date()
+
+        week_start = (
+            test_date
+            - timedelta(days=test_date.weekday())
+        )
+
+        week_end = week_start + timedelta(days=6)
+
+        body = {
+            "requestId": "decompose-scatter-test-001",
+            "userId": 1,
+
+            "weekStartDate": week_start.isoformat(),
+            "weekEndDate": week_end.isoformat(),
+            "timezone": "Asia/Seoul",
+
+            "tasks": [
+                {
+                    "taskId": 200,
+                    "title": "경진대회 발표 준비",
+                    "estimatedMinutes": 150,
+
+                    "deadline": datetime.combine(
+                        test_date,
+                        time(20, 0),
+                    ).isoformat(),
+
+                    "priority": 5,
+                    "difficulty": 3,
+                    "focusRequired": 4,
+
+                    "useAiDecomposition": True,
+                    "desiredSteps": 5,
+
+                    "postponeCount": 0,
+                    "completedMinutes": 0,
+                    "completed": False,
+                    "prerequisiteTaskIds": [],
+                }
+            ],
+
+            # 일부러 빈칸을 여러 군데 만든다.
+            "fixedSchedules": [
+                {
+                    "fixedScheduleId": 101,
+                    "title": "오전 고정 일정",
+
+                    "startTime": datetime.combine(
+                        test_date,
+                        time(10, 0),
+                    ).isoformat(),
+
+                    "endTime": datetime.combine(
+                        test_date,
+                        time(12, 0),
+                    ).isoformat(),
+                },
+
+                {
+                    "fixedScheduleId": 102,
+                    "title": "오후 고정 일정",
+
+                    "startTime": datetime.combine(
+                        test_date,
+                        time(13, 0),
+                    ).isoformat(),
+
+                    "endTime": datetime.combine(
+                        test_date,
+                        time(15, 0),
+                    ).isoformat(),
+                },
+            ],
+
+            "existingSchedules": [],
+        }
+
+        response = self.client.post(
+            "/schedules/generate",
+            json=body,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+            msg=response.text,
+        )
+
+        data = response.json()
+
+        print(
+            "\nPRESERVED SCHEDULES:",
+            data.get("preservedSchedules", [])
+        )
+
+        print(
+            "DUPLICATE REQUEST:",
+            data.get("duplicateRequest")
+        )
+
+        schedules = [
+            schedule
+            for schedule in data.get("schedules", [])
+            if str(schedule.get("taskId")) == "200"
+        ]
+
+        schedules.sort(
+            key=lambda item: item["startTime"]
+        )
+
+        print("\n=== 쪼개기 자유 배치 테스트 ===")
+
+        for schedule in schedules:
+            print(
+                "STEP",
+                schedule["stepOrder"],
+                "|",
+                schedule["title"],
+                "|",
+                schedule["startTime"],
+                "~",
+                schedule["endTime"],
+            )
+
+        self.assertEqual(
+            len(schedules),
+            5,
+            msg=data,
+        )
+
+        # 고정 일정 앞쪽 빈칸을 사용했는지
+        fixed1_start = datetime.combine(
+            test_date,
+            time(10, 0),
+        )
+
+        used_before_fixed = any(
+            datetime.fromisoformat(
+                schedule["endTime"]
+            ) <= fixed1_start
+            for schedule in schedules
+        )
+
+        # 첫 번째 고정 일정과 두 번째 고정 일정 사이
+        # 12:00~13:00 공간을 사용했는지
+        gap_start = datetime.combine(
+            test_date,
+            time(12, 0),
+        )
+
+        gap_end = datetime.combine(
+            test_date,
+            time(13, 0),
+        )
+
+        used_middle_gap = any(
+            datetime.fromisoformat(
+                schedule["startTime"]
+            ) >= gap_start
+            and
+            datetime.fromisoformat(
+                schedule["endTime"]
+            ) <= gap_end
+            for schedule in schedules
+        )
+
+        # 서로 붙어만 있지 않고 실제 시간 간격이 있는지
+        has_scattered_gap = False
+
+        for previous, current in zip(
+            schedules,
+            schedules[1:],
+        ):
+            previous_end = datetime.fromisoformat(
+                previous["endTime"]
+            )
+
+            current_start = datetime.fromisoformat(
+                current["startTime"]
+            )
+
+            if current_start > previous_end:
+                has_scattered_gap = True
+                break
+
+        self.assertTrue(
+            used_before_fixed,
+            msg=(
+                "고정 일정 전 빈 공간을 사용하지 않았습니다. "
+                f"{schedules}"
+            ),
+        )
+
+        self.assertTrue(
+            used_middle_gap,
+            msg=(
+                "고정 일정 사이 빈 공간을 사용하지 않았습니다. "
+                f"{schedules}"
+            ),
+        )
+
+        self.assertTrue(
+            has_scattered_gap,
+            msg=(
+                "분해된 단계가 모두 한 덩어리로 "
+                f"붙어서 배치되었습니다: {schedules}"
+            ),
+        )
+
+
+
+
+    def test_generate_starts_from_requested_week(self):
+
+        from datetime import (
+            datetime,
+            timedelta,
+            time,
+        )
+
+        today = datetime.now().date()
+
+        # 무조건 "다음 주 월요일"을 구함
+        days_until_next_monday = (
+            7 - today.weekday()
+        )
+
+        week_start = (
+            today
+            + timedelta(
+                days=days_until_next_monday
+            )
+        )
+
+        week_end = (
+            week_start
+            + timedelta(days=6)
+        )
+
+        body = {
+            "requestId": "future-week-test-001",
+            "userId": 1,
+
+            "weekStartDate": (
+                week_start.isoformat()
+            ),
+
+            "weekEndDate": (
+                week_end.isoformat()
+            ),
+
+            "timezone": "Asia/Seoul",
+
+            "tasks": [
+                {
+                    "taskId": 999,
+                    "title": "다음 주 테스트 작업",
+
+                    "estimatedMinutes": 120,
+
+                    "deadline": (
+                        datetime.combine(
+                            week_end,
+                            time(20, 0),
+                        ).isoformat()
+                    ),
+
+                    "priority": 3,
+                    "difficulty": 3,
+                    "focusRequired": 3,
+
+                    # Gemini 테스트가 아니라
+                    # 날짜 테스트이므로 분해 OFF
+                    "useAiDecomposition": False,
+                    "desiredSteps": None,
+
+                    "postponeCount": 0,
+                    "completedMinutes": 0,
+                    "completed": False,
+
+                    "prerequisiteTaskIds": [],
+                }
+            ],
+
+            "fixedSchedules": [],
+            "existingSchedules": [],
+        }
+
+        response = self.client.post(
+            "/schedules/generate",
+            json=body,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+            msg=response.text,
+        )
+
+        data = response.json()
+
+        schedules = data.get(
+            "schedules",
+            []
+        )
+
+        print(
+            "\n=== weekStartDate 테스트 ==="
+        )
+
+        print(
+            "요청 주간:",
+            week_start,
+            "~",
+            week_end,
+        )
+
+        for schedule in schedules:
+            print(
+                schedule["title"],
+                "|",
+                schedule["startTime"],
+                "~",
+                schedule["endTime"],
+            )
+
+        self.assertGreater(
+            len(schedules),
+            0,
+            msg=data,
+        )
+
+        requested_start = datetime.combine(
+            week_start,
+            time(9, 0),
+        )
+
+        requested_end = datetime.combine(
+            week_end,
+            time(22, 0),
+        )
+
+        for schedule in schedules:
+
+            start_time = datetime.fromisoformat(
+                schedule["startTime"]
+            )
+
+            end_time = datetime.fromisoformat(
+                schedule["endTime"]
+            )
+
+            # 요청한 주보다 이전이면 실패
+            self.assertGreaterEqual(
+                start_time,
+                requested_start,
+                msg=(
+                    "weekStartDate보다 이전에 "
+                    f"일정이 생성됐습니다: {schedule}"
+                ),
+            )
+
+            # 요청한 주를 넘어가도 실패
+            self.assertLessEqual(
+                end_time,
+                requested_end,
+                msg=(
+                    "weekEndDate보다 이후에 "
+                    f"일정이 생성됐습니다: {schedule}"
+                ),
+            )
 if __name__ == "__main__":
     unittest.main()

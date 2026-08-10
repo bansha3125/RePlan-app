@@ -119,6 +119,9 @@ class GeminiAssistant:
 규칙:
 - 단계 수를 정확히 지키세요.
 - 각 단계는 구체적인 행동으로 작성하세요.
+- title에는 원본 작업명 "{task_title}"을 반복하지 마세요.
+- title 앞에 "{task_title}:" 같은 접두사를 붙이지 마세요.
+- title에는 세부 행동 내용만 작성하세요.
 - estimated_minutes의 합은 전체 예상 시간과 비슷하게 만드세요.
 - difficulty와 focus_required는 1~5 정수입니다.
 - 첫 단계의 depends_on_order는 null, 이후 단계는 필요한 선행 단계 번호를 작성하세요.
@@ -127,7 +130,34 @@ class GeminiAssistant:
 
         try:
             data = self._generate_json(prompt, schema)
-            return GeminiResult(data=data, used_fallback=False)
+
+            # Gemini가 원본 작업명을 title 앞에
+            # 다시 붙여도 제거한다.
+            for step in data.get("steps", []):
+                title = str(
+                    step.get("title", "")
+                ).strip()
+
+                prefixes = [
+                    f"{task_title}:",
+                    f"{task_title} :",
+                    f"{task_title}-",
+                    f"{task_title} -",
+                ]
+
+                for prefix in prefixes:
+                    if title.startswith(prefix):
+                        title = title[
+                            len(prefix):
+                        ].strip()
+                        break
+
+                step["title"] = title
+
+            return GeminiResult(
+                data=data,
+                used_fallback=False,
+            )
         except Exception as exc:
             return GeminiResult(
                 data=self._fallback_decomposition(
@@ -308,7 +338,7 @@ class GeminiAssistant:
             steps.append(
                 {
                     "order": index,
-                    "title": f"{task_title}: {label}",
+                    "title": label,
                     "estimated_minutes": minutes,
                     "difficulty": min(5, 2 + (index // 3)),
                     "focus_required": 3 if index < desired_steps else 2,

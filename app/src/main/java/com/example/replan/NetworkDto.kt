@@ -64,7 +64,7 @@ data class CreateFixedScheduleApiRequest(
 // AI 스케줄 생성 요청 DTO (POST /schedules/generate)
 data class GenerateScheduleApiRequest(
     @SerializedName("userId") val userId: Long = 1L,
-    @SerializedName("weekStartDate") val weekStartDate: String? = null
+    @SerializedName("weekStartDate") val weekStartDate: String? = null // 👈 [추가] 선택 주차 시작일 (예: "2026-08-10")
 )
 
 // AI 스케줄 재배치 요청 DTO (POST /schedules/replan)
@@ -91,6 +91,7 @@ data class TaskResponse(
     @SerializedName("userId") val userId: Long? = null,
     @SerializedName("title") val title: String = "",
     @SerializedName("deadline") val deadline: String? = null,
+<<<<<<<< HEAD:app/src/main/java/com/example/replan/NetworkDto.kt
     @SerializedName("estimatedMinutes") val estimatedMinutes: Int = 120,
     @SerializedName("useAiDecomposition") val useAiDecomposition: Boolean = false,
     @SerializedName("desiredSteps") val desiredSteps: Int = 0,
@@ -100,4 +101,16 @@ data class TaskResponse(
     @SerializedName("postponeCount") val postponeCount: Int = 0,
     @SerializedName("completedMinutes") val completedMinutes: Int = 0,
     @SerializedName("completed") val completed: Boolean = false
+========
+    @SerializedName("priority") val priority: Int = 2,
+    @SerializedName("desiredSteps") val desiredSteps: Int = 0
+)
+
+// AI 일정 재배치 요청 DTO (POST /schedules/replan)
+data class ReplanScheduleApiRequest(
+    @SerializedName("userId") val userId: Long,
+    @SerializedName("replanFromTime") val replanFromTime: String,
+    @SerializedName("completedTaskIds") val completedTaskIds: List<Long> = emptyList(),
+    @SerializedName("postponedTaskIds") val postponedTaskIds: List<Long> = emptyList()
+>>>>>>>> 670d784125d9e940ea9a6780ef12e3a9379eeb95:Front/app/src/main/java/com/example/replan/NetworkDto.kt
 )
