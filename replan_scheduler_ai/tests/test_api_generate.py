@@ -153,10 +153,7 @@ class TestAPIGenerate(BaseAPITest):
             time,
         )
 
-        test_date = (
-            datetime.now()
-            + timedelta(days=1)
-        ).date()
+        test_date = datetime.now().date()
 
         week_start = (
             test_date
@@ -316,10 +313,7 @@ class TestAPIGenerate(BaseAPITest):
 
         from datetime import datetime, timedelta, time
 
-        test_date = (
-            datetime.now()
-            + timedelta(days=1)
-        ).date()
+        test_date = datetime.now().date()
 
         week_start = (
             test_date
@@ -409,6 +403,16 @@ class TestAPIGenerate(BaseAPITest):
         )
 
         data = response.json()
+
+        print(
+            "\nPRESERVED SCHEDULES:",
+            data.get("preservedSchedules", [])
+        )
+
+        print(
+            "DUPLICATE REQUEST:",
+            data.get("duplicateRequest")
+        )
 
         schedules = [
             schedule
@@ -518,5 +522,168 @@ class TestAPIGenerate(BaseAPITest):
                 f"붙어서 배치되었습니다: {schedules}"
             ),
         )
+
+
+
+
+    def test_generate_starts_from_requested_week(self):
+
+        from datetime import (
+            datetime,
+            timedelta,
+            time,
+        )
+
+        today = datetime.now().date()
+
+        # 무조건 "다음 주 월요일"을 구함
+        days_until_next_monday = (
+            7 - today.weekday()
+        )
+
+        week_start = (
+            today
+            + timedelta(
+                days=days_until_next_monday
+            )
+        )
+
+        week_end = (
+            week_start
+            + timedelta(days=6)
+        )
+
+        body = {
+            "requestId": "future-week-test-001",
+            "userId": 1,
+
+            "weekStartDate": (
+                week_start.isoformat()
+            ),
+
+            "weekEndDate": (
+                week_end.isoformat()
+            ),
+
+            "timezone": "Asia/Seoul",
+
+            "tasks": [
+                {
+                    "taskId": 999,
+                    "title": "다음 주 테스트 작업",
+
+                    "estimatedMinutes": 120,
+
+                    "deadline": (
+                        datetime.combine(
+                            week_end,
+                            time(20, 0),
+                        ).isoformat()
+                    ),
+
+                    "priority": 3,
+                    "difficulty": 3,
+                    "focusRequired": 3,
+
+                    # Gemini 테스트가 아니라
+                    # 날짜 테스트이므로 분해 OFF
+                    "useAiDecomposition": False,
+                    "desiredSteps": None,
+
+                    "postponeCount": 0,
+                    "completedMinutes": 0,
+                    "completed": False,
+
+                    "prerequisiteTaskIds": [],
+                }
+            ],
+
+            "fixedSchedules": [],
+            "existingSchedules": [],
+        }
+
+        response = self.client.post(
+            "/schedules/generate",
+            json=body,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+            msg=response.text,
+        )
+
+        data = response.json()
+
+        schedules = data.get(
+            "schedules",
+            []
+        )
+
+        print(
+            "\n=== weekStartDate 테스트 ==="
+        )
+
+        print(
+            "요청 주간:",
+            week_start,
+            "~",
+            week_end,
+        )
+
+        for schedule in schedules:
+            print(
+                schedule["title"],
+                "|",
+                schedule["startTime"],
+                "~",
+                schedule["endTime"],
+            )
+
+        self.assertGreater(
+            len(schedules),
+            0,
+            msg=data,
+        )
+
+        requested_start = datetime.combine(
+            week_start,
+            time(9, 0),
+        )
+
+        requested_end = datetime.combine(
+            week_end,
+            time(22, 0),
+        )
+
+        for schedule in schedules:
+
+            start_time = datetime.fromisoformat(
+                schedule["startTime"]
+            )
+
+            end_time = datetime.fromisoformat(
+                schedule["endTime"]
+            )
+
+            # 요청한 주보다 이전이면 실패
+            self.assertGreaterEqual(
+                start_time,
+                requested_start,
+                msg=(
+                    "weekStartDate보다 이전에 "
+                    f"일정이 생성됐습니다: {schedule}"
+                ),
+            )
+
+            # 요청한 주를 넘어가도 실패
+            self.assertLessEqual(
+                end_time,
+                requested_end,
+                msg=(
+                    "weekEndDate보다 이후에 "
+                    f"일정이 생성됐습니다: {schedule}"
+                ),
+            )
 if __name__ == "__main__":
     unittest.main()
