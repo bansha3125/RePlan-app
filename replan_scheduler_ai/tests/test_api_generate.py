@@ -311,5 +311,212 @@ class TestAPIGenerate(BaseAPITest):
             actual_orders,
             list(range(1, desired_steps + 1)),
         )
+        
+    def test_ai_decomposition_can_scatter_across_gaps(self):
+
+        from datetime import datetime, timedelta, time
+
+        test_date = (
+            datetime.now()
+            + timedelta(days=1)
+        ).date()
+
+        week_start = (
+            test_date
+            - timedelta(days=test_date.weekday())
+        )
+
+        week_end = week_start + timedelta(days=6)
+
+        body = {
+            "requestId": "decompose-scatter-test-001",
+            "userId": 1,
+
+            "weekStartDate": week_start.isoformat(),
+            "weekEndDate": week_end.isoformat(),
+            "timezone": "Asia/Seoul",
+
+            "tasks": [
+                {
+                    "taskId": 200,
+                    "title": "경진대회 발표 준비",
+                    "estimatedMinutes": 150,
+
+                    "deadline": datetime.combine(
+                        test_date,
+                        time(20, 0),
+                    ).isoformat(),
+
+                    "priority": 5,
+                    "difficulty": 3,
+                    "focusRequired": 4,
+
+                    "useAiDecomposition": True,
+                    "desiredSteps": 5,
+
+                    "postponeCount": 0,
+                    "completedMinutes": 0,
+                    "completed": False,
+                    "prerequisiteTaskIds": [],
+                }
+            ],
+
+            # 일부러 빈칸을 여러 군데 만든다.
+            "fixedSchedules": [
+                {
+                    "fixedScheduleId": 101,
+                    "title": "오전 고정 일정",
+
+                    "startTime": datetime.combine(
+                        test_date,
+                        time(10, 0),
+                    ).isoformat(),
+
+                    "endTime": datetime.combine(
+                        test_date,
+                        time(12, 0),
+                    ).isoformat(),
+                },
+
+                {
+                    "fixedScheduleId": 102,
+                    "title": "오후 고정 일정",
+
+                    "startTime": datetime.combine(
+                        test_date,
+                        time(13, 0),
+                    ).isoformat(),
+
+                    "endTime": datetime.combine(
+                        test_date,
+                        time(15, 0),
+                    ).isoformat(),
+                },
+            ],
+
+            "existingSchedules": [],
+        }
+
+        response = self.client.post(
+            "/schedules/generate",
+            json=body,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+            msg=response.text,
+        )
+
+        data = response.json()
+
+        schedules = [
+            schedule
+            for schedule in data.get("schedules", [])
+            if str(schedule.get("taskId")) == "200"
+        ]
+
+        schedules.sort(
+            key=lambda item: item["startTime"]
+        )
+
+        print("\n=== 쪼개기 자유 배치 테스트 ===")
+
+        for schedule in schedules:
+            print(
+                "STEP",
+                schedule["stepOrder"],
+                "|",
+                schedule["title"],
+                "|",
+                schedule["startTime"],
+                "~",
+                schedule["endTime"],
+            )
+
+        self.assertEqual(
+            len(schedules),
+            5,
+            msg=data,
+        )
+
+        # 고정 일정 앞쪽 빈칸을 사용했는지
+        fixed1_start = datetime.combine(
+            test_date,
+            time(10, 0),
+        )
+
+        used_before_fixed = any(
+            datetime.fromisoformat(
+                schedule["endTime"]
+            ) <= fixed1_start
+            for schedule in schedules
+        )
+
+        # 첫 번째 고정 일정과 두 번째 고정 일정 사이
+        # 12:00~13:00 공간을 사용했는지
+        gap_start = datetime.combine(
+            test_date,
+            time(12, 0),
+        )
+
+        gap_end = datetime.combine(
+            test_date,
+            time(13, 0),
+        )
+
+        used_middle_gap = any(
+            datetime.fromisoformat(
+                schedule["startTime"]
+            ) >= gap_start
+            and
+            datetime.fromisoformat(
+                schedule["endTime"]
+            ) <= gap_end
+            for schedule in schedules
+        )
+
+        # 서로 붙어만 있지 않고 실제 시간 간격이 있는지
+        has_scattered_gap = False
+
+        for previous, current in zip(
+            schedules,
+            schedules[1:],
+        ):
+            previous_end = datetime.fromisoformat(
+                previous["endTime"]
+            )
+
+            current_start = datetime.fromisoformat(
+                current["startTime"]
+            )
+
+            if current_start > previous_end:
+                has_scattered_gap = True
+                break
+
+        self.assertTrue(
+            used_before_fixed,
+            msg=(
+                "고정 일정 전 빈 공간을 사용하지 않았습니다. "
+                f"{schedules}"
+            ),
+        )
+
+        self.assertTrue(
+            used_middle_gap,
+            msg=(
+                "고정 일정 사이 빈 공간을 사용하지 않았습니다. "
+                f"{schedules}"
+            ),
+        )
+
+        self.assertTrue(
+            has_scattered_gap,
+            msg=(
+                "분해된 단계가 모두 한 덩어리로 "
+                f"붙어서 배치되었습니다: {schedules}"
+            ),
+        )
 if __name__ == "__main__":
     unittest.main()

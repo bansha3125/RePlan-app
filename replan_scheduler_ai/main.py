@@ -343,6 +343,14 @@ def _expand_decomposed_tasks(
             )
         )
 
+        print(
+            "[GEMINI DECOMPOSE]",
+            "title =", task["title"],
+            "desired_steps =", desired_steps,
+            "used_fallback =", decomposition_result.used_fallback,
+            "error =", decomposition_result.error,
+        )
+
         steps = decomposition_result.data.get(
             "steps",
             [],
