@@ -42,12 +42,12 @@ data class GeneratedScheduleDto(
 data class CreateTaskApiRequest(
     @SerializedName("userId") val userId: Long = 1L,
     @SerializedName("title") val title: String,
-    @SerializedName("deadline") val deadline: String? = "2026-08-31T23:59:59",
+    @SerializedName("deadline") val deadline: String? = null,
     @SerializedName("estimatedMinutes") val estimatedMinutes: Int,
-    @SerializedName("priority") val priority: Int = 2, // 우선순위 (1: 상, 2: 중, 3: 하)
+    @SerializedName("priority") val priority: Int = 2, // 우선순위 (3: 상, 2: 중, 1: 하)
     @SerializedName("useAiDecomposition") val useAiDecomposition: Boolean = false,
     @SerializedName("desiredSteps") val desiredSteps: Int = 0,
-    @SerializedName("deadlineType") val deadlineType: String? = null,
+    @SerializedName("deadlineType") val deadlineType: String? = "DATE",
     @SerializedName("linkedScheduleId") val linkedScheduleId: Long? = null
 )
 
@@ -94,10 +94,20 @@ data class TaskResponse(
     @SerializedName("estimatedMinutes") val estimatedMinutes: Int = 120,
     @SerializedName("useAiDecomposition") val useAiDecomposition: Boolean = false,
     @SerializedName("desiredSteps") val desiredSteps: Int = 0,
-    @SerializedName("priority") val priority: Int = 1,
+    @SerializedName("priority") val priority: Int = 2, // 우선순위 (3: 상, 2: 중, 1: 하)
     @SerializedName("difficulty") val difficulty: Int = 3,
     @SerializedName("focusRequired") val focusRequired: Int = 3,
     @SerializedName("postponeCount") val postponeCount: Int = 0,
     @SerializedName("completedMinutes") val completedMinutes: Int = 0,
     @SerializedName("completed") val completed: Boolean = false
+)
+
+data class ScheduleCardTag(
+    val taskId: Long? = null,
+    val blockId: String? = null,
+    val fixedScheduleId: Long? = null,
+    val type: String = "AI",
+    val locked: Boolean = false,
+    var startMin: Int = 0,
+    var endMin: Int = 60
 )

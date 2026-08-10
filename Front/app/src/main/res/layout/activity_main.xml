@@ -57,7 +57,7 @@
                         android:id="@+id/tvWeekRange"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="8월 3일 - 8월 9일"
+                        android:text="8월 10일 - 8월 16일"
                         android:textSize="20sp"
                         android:textStyle="bold"
                         android:textColor="#111111"
@@ -121,7 +121,7 @@
                 android:paddingHorizontal="12dp"
                 android:layout_marginTop="12dp">
 
-                <!-- 요일 인덱스 헤더 (좌측 시간축 여백 32dp 확보) -->
+                <!-- 요일 인덱스 헤더 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -129,7 +129,7 @@
                     android:paddingBottom="6dp">
 
                     <TextView
-                        android:layout_width="32dp"
+                        android:layout_width="36dp"
                         android:layout_height="wrap_content"
                         android:text="시간"
                         android:textSize="10sp"
@@ -152,25 +152,30 @@
                     </LinearLayout>
                 </LinearLayout>
 
-                <!-- 시간 축 + 요일 기둥 본체 -->
+                <!-- 시간 축 + 요일 기둥 본체 (2시간 간격 적용) -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal">
 
-                    <!-- 좌측 시간 라벨 (09시 ~ 21시) -->
+                    <!-- 좌측 시간 라벨 (00:00 ~ 22:00, 2시간당 52dp) -->
                     <LinearLayout
-                        android:layout_width="32dp"
+                        android:layout_width="36dp"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
                         android:paddingTop="2dp">
-                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="09:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
-                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="11:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
-                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="13:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
-                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="15:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
-                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="17:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
-                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="19:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
-                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="21:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
+                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="00:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
+                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="02:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
+                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="04:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
+                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="06:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
+                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="08:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
+                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="10:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
+                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="12:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
+                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="14:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
+                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="16:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
+                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="18:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
+                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="20:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
+                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="22:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
                     </LinearLayout>
 
                     <!-- 7개 요일 세로 바구니 -->
@@ -180,7 +185,7 @@
                         android:layout_weight="1"
                         android:orientation="horizontal"
                         android:weightSum="7"
-                        android:minHeight="360dp">
+                        android:minHeight="624dp">
 
                         <LinearLayout android:id="@+id/containerMon" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center_horizontal"/>
                         <LinearLayout android:id="@+id/containerTue" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center_horizontal"/>

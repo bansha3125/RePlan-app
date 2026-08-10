@@ -3,19 +3,23 @@ package com.example.replan
 import android.content.ClipData
 import android.content.ClipDescription
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.text.TextUtils
 import android.util.Log
 import android.view.DragEvent
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.cardview.widget.CardView
+import androidx.core.widget.NestedScrollView
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -27,14 +31,11 @@ import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
-    private val USE_MOCK_DATA = false
-
     private val todoList = mutableListOf<Todo>()
     private lateinit var todoAdapter: TodoAdapter
 
-    // 서버에서 응답받은 AI 배치 일정을 보관하여 쪼개기 팝업에서 참조
     private var currentGeneratedSchedules = listOf<GeneratedScheduleDto>()
-
+    private var currentFixedSchedules = listOf<FixedScheduleDto>()
     private var replayChanges = listOf<ScheduleChangeDto>()
     private var currentStepIndex = -1
     private var isPlaying = false
@@ -43,15 +44,23 @@ class MainActivity : AppCompatActivity() {
 
     private val completedStepsMap = mutableMapOf<String, MutableSet<Int>>()
 
-    // 현재 선택된 주차 기준 날짜 (기본값: 이번 주 월요일)
-    private var currentWeekCalendar: Calendar = Calendar.getInstance().apply {
+    private var currentWeekCalendar: Calendar = Calendar.getInstance(Locale.KOREA).apply {
         firstDayOfWeek = Calendar.MONDAY
         set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
     }
 
+    private val MINUTE_FACTOR: Float = 75f / 120f
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        val today = Calendar.getInstance(Locale.KOREA)
+        currentWeekCalendar = Calendar.getInstance(Locale.KOREA).apply {
+            firstDayOfWeek = Calendar.MONDAY
+            time = today.time
+            set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+        }
 
         updateHeaderWeekRangeText()
 
@@ -65,19 +74,13 @@ class MainActivity : AppCompatActivity() {
         }
 
         val fabAdd = findViewSafely<View>("fabAdd") ?: findViewSafely<View>("fab_add")
-        fabAdd?.setOnClickListener {
-            showAddTodoBottomSheet()
-        }
+        fabAdd?.setOnClickListener { showAddTodoBottomSheet() }
 
         val btnAddFixed = findViewSafely<Button>("btnAddFixed")
-        btnAddFixed?.setOnClickListener {
-            showFixedScheduleBottomSheet()
-        }
+        btnAddFixed?.setOnClickListener { showFixedScheduleBottomSheet() }
 
         val btnAutoSort = findViewSafely<Button>("btnAutoSort")
-        btnAutoSort?.setOnClickListener {
-            startAiReplayPipeline()
-        }
+        btnAutoSort?.setOnClickListener { startAiReplayPipeline() }
 
         val btnPrevWeek = findViewSafely<View>("btnPrevWeek") ?: findViewSafely<View>("btn_prev")
         val btnNextWeek = findViewSafely<View>("btnNextWeek") ?: findViewSafely<View>("btn_next")
@@ -95,6 +98,39 @@ class MainActivity : AppCompatActivity() {
         return if (id != 0) findViewById(id) else null
     }
 
+    private fun scrollToMorningEight() {
+        val rootView = findViewById<View>(android.R.id.content) ?: return
+
+        var targetScrollView: View? = null
+
+        fun findScrollViewRecursive(view: View) {
+            if (view is ScrollView || view is NestedScrollView) {
+                targetScrollView = view
+                return
+            }
+            if (view is ViewGroup) {
+                for (i in 0 until view.childCount) {
+                    findScrollViewRecursive(view.getChildAt(i))
+                    if (targetScrollView != null) return
+                }
+            }
+        }
+
+        findScrollViewRecursive(rootView)
+
+        val targetY = dpToPx((480 * MINUTE_FACTOR).toInt()) // 08:00
+
+        handler.postDelayed({
+            targetScrollView?.let { sv ->
+                if (sv is ScrollView) {
+                    sv.smoothScrollTo(0, targetY)
+                } else if (sv is NestedScrollView) {
+                    sv.smoothScrollTo(0, targetY)
+                }
+            }
+        }, 300)
+    }
+
     private fun changeWeek(amount: Int) {
         currentWeekCalendar.add(Calendar.WEEK_OF_YEAR, amount)
         updateHeaderWeekRangeText()
@@ -109,7 +145,6 @@ class MainActivity : AppCompatActivity() {
 
         val startSdf = SimpleDateFormat("M월 d일", Locale.KOREA)
         val textStr = "${startSdf.format(startCal.time)} - ${startSdf.format(endCal.time)}"
-
         tvWeekRange?.text = textStr
     }
 
@@ -134,18 +169,19 @@ class MainActivity : AppCompatActivity() {
                         weekStartDate = getSelectedWeekStartDate()
                     )
 
-                    Log.d("SERVER_RESPONSE", "주간 조회 fixed: ${response.fixedSchedules.size}, generated: ${response.generatedSchedules.size}")
-
+                    currentFixedSchedules = response.fixedSchedules
                     currentGeneratedSchedules = response.generatedSchedules
-
                     clearAllContainers()
 
-                    response.fixedSchedules.forEach { fixed ->
-                        renderFixedScheduleCard(fixed)
-                    }
+                    response.fixedSchedules.forEach { renderFixedScheduleCard(it) }
+                    response.generatedSchedules.forEach { renderGeneratedScheduleCard(it) }
 
-                    response.generatedSchedules.forEach { gen ->
-                        renderGeneratedScheduleCard(gen)
+                    replayChanges = parseGeneratedSchedulesToChanges(response.generatedSchedules)
+                    currentStepIndex = response.generatedSchedules.size - 1
+
+                    val layoutReplayControl = findViewSafely<LinearLayout>("layoutReplayControl")
+                    if (replayChanges.isNotEmpty()) {
+                        layoutReplayControl?.visibility = View.VISIBLE
                     }
 
                     try {
@@ -160,11 +196,18 @@ class MainActivity : AppCompatActivity() {
 
                             weeklyTasks.forEach { task ->
                                 val priorityText = when (task.priority) {
-                                    1 -> "높음"
+                                    3 -> "상"
                                     2 -> "중"
-                                    3 -> "낮음"
+                                    1 -> "하"
                                     else -> "중"
                                 }
+
+                                // ★ [보완] 해당 Task와 연관된 AI 일정의 개수를 파악하여 desiredSteps가 0이어도 정상 매핑
+                                val matchedCount = response.generatedSchedules.count { gen ->
+                                    gen.taskId == task.taskId || (task.title.isNotEmpty() && gen.title.contains(task.title))
+                                }
+                                val steps = if (task.desiredSteps > 0) task.desiredSteps else if (matchedCount > 0) matchedCount else 3
+
                                 todoList.add(
                                     Todo(
                                         id = task.taskId?.toString() ?: java.util.UUID.randomUUID().toString(),
@@ -173,21 +216,23 @@ class MainActivity : AppCompatActivity() {
                                         specificScheduleName = null,
                                         expectedTime = task.estimatedMinutes / 60,
                                         priority = priorityText,
-                                        desiredSteps = task.desiredSteps,
+                                        desiredSteps = steps,
                                         subSteps = emptyList()
                                     )
                                 )
                             }
                         }
                         if (::todoAdapter.isInitialized) todoAdapter.notifyDataSetChanged()
-                    } catch (taskEx: Exception) {
-                        Log.e("TASK_FETCH_EX", "getTasks 불러오기 예외: ${taskEx.message}")
+                    } catch (e: Exception) {
+                        Log.e("TASK_FETCH_EX", "getTasks 예외: ${e.message}")
                     }
+
+                    scrollToMorningEight()
 
                     Toast.makeText(this@MainActivity, "일정을 불러왔습니다! ✨", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
                     e.printStackTrace()
-                    Toast.makeText(this@MainActivity, "일정 조회 실패: 네트워크 연결을 확인하세요.", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "일정 조회 실패", Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -198,14 +243,12 @@ class MainActivity : AppCompatActivity() {
         btnAutoSort?.isEnabled = false
 
         val tvAiFeedback = findViewSafely<TextView>("tvAiFeedback")
-        tvAiFeedback?.text = "🤖 AI가 일정을 정리하고 있습니다. 잠시만 기다려 주세요..."
+        tvAiFeedback?.text = "🤖 AI가 일정을 정리하고 있습니다..."
 
         simulateServerLoading("AI 일정을 생성하고 있습니다...") {
             lifecycleScope.launch {
                 try {
                     val currentWeekStart = getSelectedWeekStartDate()
-                    Log.d("AI_CALL", "백엔드 AI 스케줄링 API(generateSchedules) - 대상 주차: $currentWeekStart")
-
                     val apiResponse = ApiClient.service.generateSchedules(
                         GenerateScheduleApiRequest(
                             userId = 1L,
@@ -218,15 +261,14 @@ class MainActivity : AppCompatActivity() {
                             userId = 1L,
                             weekStartDate = currentWeekStart
                         )
+                        currentFixedSchedules = updatedWeekly.fixedSchedules
                         currentGeneratedSchedules = updatedWeekly.generatedSchedules
                         handleGeneratedSchedulesResponse(updatedWeekly)
                     } else {
                         Toast.makeText(this@MainActivity, "AI 일정 생성 실패 (서버 오류)", Toast.LENGTH_SHORT).show()
                     }
-
                 } catch (e: Exception) {
                     e.printStackTrace()
-                    Log.e("AI_CALL_EX", "AI 통신 예외: ${e.message}")
                     Toast.makeText(this@MainActivity, "일정 생성 실패: ${e.message}", Toast.LENGTH_SHORT).show()
                 } finally {
                     btnAutoSort?.isEnabled = true
@@ -237,8 +279,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun handleGeneratedSchedulesResponse(response: WeeklyScheduleResponse) {
         val tvAiFeedback = findViewSafely<TextView>("tvAiFeedback")
-
         clearAllContainers()
+
         response.fixedSchedules.forEach { renderFixedScheduleCard(it) }
         response.generatedSchedules.forEach { renderGeneratedScheduleCard(it) }
 
@@ -247,93 +289,54 @@ class MainActivity : AppCompatActivity() {
         val layoutReplayControl = findViewSafely<LinearLayout>("layoutReplayControl")
         layoutReplayControl?.visibility = View.VISIBLE
 
-        currentStepIndex = -1
+        stopAutoPlay()
+        currentStepIndex = replayChanges.size - 1
+
+        scrollToMorningEight()
+
         if (replayChanges.isNotEmpty()) {
             tvAiFeedback?.text = "🤖 AI가 ${replayChanges.size}개의 세부 일정 배치를 완료했습니다!"
             Toast.makeText(this@MainActivity, "AI 일정 자동 정렬 완료! ✨", Toast.LENGTH_SHORT).show()
         } else {
             tvAiFeedback?.text = "🤖 정리할 AI 일정을 찾을 수 없습니다."
         }
-
-        lifecycleScope.launch {
-            try {
-                val tasks = ApiClient.service.getTasks(userId = 1L)
-                val selectedSundayDate = getSelectedWeekSundayDeadline().split("T")[0]
-
-                todoList.clear()
-                if (tasks.isNotEmpty()) {
-                    val weeklyTasks = tasks.filter { task ->
-                        task.deadline?.contains(selectedSundayDate) == true || task.deadline == null
-                    }
-
-                    weeklyTasks.forEach { task ->
-                        val priorityText = when (task.priority) {
-                            1 -> "높음"
-                            2 -> "중"
-                            3 -> "낮음"
-                            else -> "중"
-                        }
-                        todoList.add(
-                            Todo(
-                                id = task.taskId?.toString() ?: java.util.UUID.randomUUID().toString(),
-                                name = task.title,
-                                deadlineType = "DATE",
-                                specificScheduleName = null,
-                                expectedTime = task.estimatedMinutes / 60,
-                                priority = priorityText,
-                                desiredSteps = task.desiredSteps,
-                                subSteps = emptyList()
-                            )
-                        )
-                    }
-                }
-                if (::todoAdapter.isInitialized) todoAdapter.notifyDataSetChanged()
-            } catch (e: Exception) {
-                Log.e("TASK_SYNC_EX", "자동정렬 후 Task 동기화 실패: ${e.message}")
-            }
-        }
     }
 
-    private fun calculateCardHeightDp(startTimeStr: String, endTimeStr: String): Int {
-        try {
-            val format = SimpleDateFormat("yyyy-MM-dd'T'HH:mm", Locale.KOREA)
-            val startDate = format.parse(startTimeStr.substring(0, 16))
-            val endDate = format.parse(endTimeStr.substring(0, 16))
-
-            if (startDate != null && endDate != null) {
-                val diffMinutes = ((endDate.time - startDate.time) / (1000 * 60)).toInt()
-                return when {
-                    diffMinutes <= 30 -> 44
-                    diffMinutes <= 60 -> 68
-                    diffMinutes <= 90 -> 100
-                    diffMinutes <= 120 -> 130
-                    else -> 160
-                }
-            }
+    private fun parseTimeToMinutes(timeStr: String): Int {
+        return try {
+            val clean = if (timeStr.contains("T")) timeStr.split("T")[1] else timeStr
+            val parts = clean.split(":")
+            parts[0].toInt() * 60 + parts[1].toInt()
         } catch (e: Exception) {
-            e.printStackTrace()
+            0
         }
-        return 56
     }
 
     private fun renderFixedScheduleCard(fixed: FixedScheduleDto) {
         val dayKey = convertDayToKey(fixed.repeatDay ?: fixed.startTime)
         val container = findViewSafely<LinearLayout>("container$dayKey") ?: return
-        val cardHeightDp = calculateCardHeightDp(fixed.startTime, fixed.endTime)
+
+        val startMin = parseTimeToMinutes(fixed.startTime)
+        val endMin = parseTimeToMinutes(fixed.endTime)
+        val durationMinutes = (endMin - startMin).coerceAtLeast(30)
+
+        val cardHeightDp = (durationMinutes * MINUTE_FACTOR).toInt().coerceAtLeast(24)
 
         val card = CardView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 dpToPx(cardHeightDp)
-            ).apply { setMargins(dpToPx(1), dpToPx(3), dpToPx(1), dpToPx(3)) }
-            radius = dpToPx(8).toFloat()
+            )
+            radius = dpToPx(6).toFloat()
             cardElevation = 0f
             setCardBackgroundColor(Color.parseColor("#E0E0E0"))
 
-            tag = mapOf(
-                "fixedScheduleId" to fixed.fixedScheduleId,
-                "locked" to fixed.locked,
-                "type" to "FIXED"
+            tag = ScheduleCardTag(
+                fixedScheduleId = fixed.fixedScheduleId,
+                locked = fixed.locked,
+                type = "FIXED",
+                startMin = startMin,
+                endMin = endMin
             )
         }
 
@@ -343,74 +346,87 @@ class MainActivity : AppCompatActivity() {
             setTextColor(Color.parseColor("#424242"))
             textSize = 9.5f
             gravity = Gravity.CENTER
+            setPadding(dpToPx(2), dpToPx(2), dpToPx(2), dpToPx(2))
+            maxLines = 3
+            ellipsize = TextUtils.TruncateAt.END
         }
         card.addView(tv)
         enableDragAndDrop(card)
+
         container.addView(card)
+        recalculateContainerLayout(container)
     }
 
     private fun renderGeneratedScheduleCard(gen: GeneratedScheduleDto) {
         val selectedWeekStart = getSelectedWeekStartDate()
         val selectedSundayDate = getSelectedWeekSundayDeadline().split("T")[0]
-
         val cardDate = if (gen.startTime.contains("T")) gen.startTime.split("T")[0] else gen.startTime
 
         if (cardDate.isNotEmpty() && cardDate.contains("-")) {
-            if (cardDate < selectedWeekStart || cardDate > selectedSundayDate) {
-                return
-            }
+            if (cardDate < selectedWeekStart || cardDate > selectedSundayDate) return
         }
 
         val dayKey = convertDayToKey(gen.startTime)
         val container = findViewSafely<LinearLayout>("container$dayKey") ?: return
 
-        val cardHeightDp = calculateCardHeightDp(gen.startTime, gen.endTime)
+        val startMin = parseTimeToMinutes(gen.startTime)
+        val endMin = parseTimeToMinutes(gen.endTime)
+        val durationMinutes = (endMin - startMin).coerceAtLeast(30)
 
+        val cardHeightDp = (durationMinutes * MINUTE_FACTOR).toInt().coerceAtLeast(24)
         val cardBgColor = if (gen.completed) "#4CAF50" else if (gen.locked) "#1A237E" else "#283593"
+
+        val totalBlocks = currentGeneratedSchedules.count { it.taskId == gen.taskId }
+
+        val displayTitle = when {
+            gen.title.startsWith("[") -> gen.title
+            gen.stepOrder > 0 && totalBlocks > 1 -> "[${gen.stepOrder}/$totalBlocks]\n${gen.title}"
+            gen.stepOrder > 0 -> "[${gen.stepOrder}단계]\n${gen.title}"
+            else -> gen.title
+        }
 
         val card = CardView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 dpToPx(cardHeightDp)
-            ).apply { setMargins(dpToPx(1), dpToPx(3), dpToPx(1), dpToPx(3)) }
-            radius = dpToPx(8).toFloat()
+            )
+            radius = dpToPx(6).toFloat()
             cardElevation = 2f
             setCardBackgroundColor(Color.parseColor(cardBgColor))
 
-            tag = mapOf(
-                "taskId" to gen.taskId,
-                "blockId" to gen.blockId,
-                "stepOrder" to gen.stepOrder,
-                "locked" to gen.locked,
-                "completed" to gen.completed,
-                "type" to "AI"
+            tag = ScheduleCardTag(
+                taskId = gen.taskId,
+                blockId = gen.blockId,
+                type = "AI",
+                locked = gen.locked,
+                startMin = startMin,
+                endMin = endMin
             )
         }
 
         val tv = TextView(this).apply {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT)
-            val lockTag = if (gen.locked) "🔒 " else ""
-            val doneTag = if (gen.completed) "✔ " else ""
-
-            text = "$doneTag$lockTag${gen.title}"
+            text = displayTitle
             setTextColor(Color.WHITE)
             textSize = 9.5f
             gravity = Gravity.CENTER
+            setPadding(dpToPx(2), dpToPx(2), dpToPx(2), dpToPx(2))
+
+            maxLines = 3
+            ellipsize = TextUtils.TruncateAt.END
         }
         card.addView(tv)
-
-        card.setOnClickListener {
-            showScheduleActionDialog(gen)
-        }
-
+        card.setOnClickListener { showScheduleActionDialog(gen) }
         enableDragAndDrop(card)
+
         container.addView(card)
+        recalculateContainerLayout(container)
     }
 
     private fun showScheduleActionDialog(gen: GeneratedScheduleDto) {
         val options = arrayOf(
-            if (gen.completed) "완료 취소" else "✔ 완료 처리 (taskId: ${gen.taskId})",
-            if (gen.locked) "고정 해제" else "🔒 일정 고정 (blockId: ${gen.blockId})"
+            if (gen.completed) "완료 취소" else "✔ 완료 처리",
+            if (gen.locked) "고정 해제" else "🔒 일정 고정"
         )
 
         AlertDialog.Builder(this)
@@ -433,8 +449,8 @@ class MainActivity : AppCompatActivity() {
         startTime: String? = null,
         endTime: String? = null
     ) {
-        Log.d("DRAG_MOVE", "이동 완료: taskId=$taskId, blockId=$blockId, startTime=$startTime")
-        Toast.makeText(this@MainActivity, "일정 위치가 조정되었습니다! 📌", Toast.LENGTH_SHORT).show()
+        Log.d("DRAG_MOVE", "상태 변경: taskId=$taskId, blockId=$blockId, startTime=$startTime")
+        Toast.makeText(this@MainActivity, "일정이 업데이트되었습니다! 📌", Toast.LENGTH_SHORT).show()
     }
 
     private fun showAddTodoBottomSheet() {
@@ -461,9 +477,11 @@ class MainActivity : AppCompatActivity() {
 
         var selectedPriorityInt = 2
         val priorityButtons = listOfNotNull(btnPriorityHigh, btnPriorityMedium, btnPriorityLow)
+        val priorityValues = listOf(3, 2, 1)
+
         priorityButtons.forEachIndexed { index, btn ->
             btn.setOnClickListener {
-                selectedPriorityInt = index + 1
+                selectedPriorityInt = priorityValues[index]
                 priorityButtons.forEach { targetBtn ->
                     if (targetBtn == btn) {
                         targetBtn.setBackgroundColor(Color.parseColor("#283593"))
@@ -476,7 +494,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        var desiredSteps = 0
+        var desiredSteps = 3 // 기본값 3단계 설정
         val aiButtons = listOfNotNull(btnAiNone, btnAi3Steps, btnAi5Steps, btnAi7Steps)
         val stepValues = listOf(0, 3, 5, 7)
         aiButtons.forEachIndexed { index, btn ->
@@ -496,7 +514,7 @@ class MainActivity : AppCompatActivity() {
 
         btnRegisterTodo?.setOnClickListener {
             val todoName = etTodoName?.text?.toString()?.trim() ?: ""
-            val expectedTimeStr = etExpectedTime?.text?.toString()?.trim() ?: ""
+            val expectedTimeStr = etExpectedTime?.text?.toString() ?: ""
 
             if (todoName.isEmpty()) {
                 Toast.makeText(this, "할 일 이름을 입력해 주세요!", Toast.LENGTH_SHORT).show()
@@ -504,11 +522,10 @@ class MainActivity : AppCompatActivity() {
             }
 
             val expectedMinutes = if (expectedTimeStr.isEmpty()) 120 else expectedTimeStr.toInt() * 60
-
             val priorityText = when (selectedPriorityInt) {
-                1 -> "높음"
+                3 -> "상"
                 2 -> "중"
-                3 -> "낮음"
+                1 -> "하"
                 else -> "중"
             }
 
@@ -530,7 +547,6 @@ class MainActivity : AppCompatActivity() {
                 lifecycleScope.launch {
                     try {
                         val response = ApiClient.service.createTask(request = apiRequest)
-
                         if (response.isSuccessful) {
                             val newTodo = Todo(
                                 id = java.util.UUID.randomUUID().toString(),
@@ -544,16 +560,10 @@ class MainActivity : AppCompatActivity() {
                             )
                             todoList.add(newTodo)
                             if (::todoAdapter.isInitialized) todoAdapter.notifyDataSetChanged()
-
-                            Toast.makeText(
-                                this@MainActivity,
-                                "'${apiRequest.title}' 등록 완료!",
-                                Toast.LENGTH_SHORT
-                            ).show()
+                            Toast.makeText(this@MainActivity, "'${apiRequest.title}' 등록 완료!", Toast.LENGTH_SHORT).show()
                         } else {
-                            Toast.makeText(this@MainActivity, "저장 실패 (서버 응답 오류)", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this@MainActivity, "저장 실패", Toast.LENGTH_SHORT).show()
                         }
-
                     } catch (e: Exception) {
                         e.printStackTrace()
                         Toast.makeText(this@MainActivity, "저장 실패: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -564,7 +574,6 @@ class MainActivity : AppCompatActivity() {
         bottomSheetDialog.show()
     }
 
-    // 🚀 [수정] 복수 요일 선택 및 입력 시간(HH:mm) 정확 보정 등록 로직
     private fun showFixedScheduleBottomSheet() {
         val bottomSheetDialog = BottomSheetDialog(this)
         val view = layoutInflater.inflate(R.layout.bottom_sheet_fixed_schedule, null)
@@ -580,35 +589,39 @@ class MainActivity : AppCompatActivity() {
         val etEndTime = findInView<EditText>("etEndTime")
         val btnRegister = findInView<Button>("btnRegister")
 
-        val btnMon = findInView<Button>("btnDayMon") ?: findInView<Button>("btnMon")
-        val btnTue = findInView<Button>("btnDayTue") ?: findInView<Button>("btnTue")
-        val btnWed = findInView<Button>("btnDayWed") ?: findInView<Button>("btnWed")
-        val btnThu = findInView<Button>("btnDayThu") ?: findInView<Button>("btnThu")
-        val btnFri = findInView<Button>("btnDayFri") ?: findInView<Button>("btnFri")
-        val btnSat = findInView<Button>("btnDaySat") ?: findInView<Button>("btnSat")
-        val btnSun = findInView<Button>("btnDaySun") ?: findInView<Button>("btnSun")
+        val dayButtons = mutableListOf<Pair<Button, String>>()
+        val dayConfigs = listOf(
+            listOf("btnDayMon", "btnMon", "btnDay1", "btnMonDay") to "MON",
+            listOf("btnDayTue", "btnTue", "btnDay2", "btnTueDay") to "TUE",
+            listOf("btnDayWed", "btnWed", "btnDay3", "btnWedDay") to "WED",
+            listOf("btnDayThu", "btnThu", "btnDay4", "btnThuDay") to "THU",
+            listOf("btnDayFri", "btnFri", "btnDay5", "btnFriDay") to "FRI",
+            listOf("btnDaySat", "btnSat", "btnDay6", "btnSatDay") to "SAT",
+            listOf("btnDaySun", "btnSun", "btnDay7", "btnSunDay") to "SUN"
+        )
 
-        val dayButtons = listOf(
-            btnMon?.let { it to "MON" },
-            btnTue?.let { it to "TUE" },
-            btnWed?.let { it to "WED" },
-            btnThu?.let { it to "THU" },
-            btnFri?.let { it to "FRI" },
-            btnSat?.let { it to "SAT" },
-            btnSun?.let { it to "SUN" }
-        ).filterNotNull()
+        dayConfigs.forEach { (idNames, dayCode) ->
+            var matchedBtn: Button? = null
+            for (idName in idNames) {
+                matchedBtn = findInView<Button>(idName)
+                if (matchedBtn != null) break
+            }
+            if (matchedBtn != null) {
+                dayButtons.add(matchedBtn to dayCode)
+            }
+        }
 
-        // 🚀 복수 요일 선택을 위한 집합 (Set)
-        val selectedDays = mutableSetOf<String>("MON")
+        val selectedDays = mutableSetOf<String>()
 
-        dayButtons.forEach { (btn, dayCode) ->
+        dayButtons.forEach { (btn: Button, dayCode: String) ->
+            btn.setBackgroundColor(Color.parseColor("#D1D1D6"))
+            btn.setTextColor(Color.parseColor("#333333"))
+
             btn.setOnClickListener {
                 if (selectedDays.contains(dayCode)) {
-                    if (selectedDays.size > 1) { // 최소 1개는 선택 유지
-                        selectedDays.remove(dayCode)
-                        btn.setBackgroundColor(Color.parseColor("#D1D1D6"))
-                        btn.setTextColor(Color.parseColor("#333333"))
-                    }
+                    selectedDays.remove(dayCode)
+                    btn.setBackgroundColor(Color.parseColor("#D1D1D6"))
+                    btn.setTextColor(Color.parseColor("#333333"))
                 } else {
                     selectedDays.add(dayCode)
                     btn.setBackgroundColor(Color.parseColor("#283593"))
@@ -617,22 +630,14 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // 입력된 시간 텍스트 정규화 ("9:00" -> "09:00:00")
         fun formatTimeString(rawTime: String, defaultTime: String): String {
             val trimmed = rawTime.trim()
             if (trimmed.isEmpty()) return "$defaultTime:00"
             val parts = trimmed.split(":")
             return when (parts.size) {
-                1 -> {
-                    val hour = parts[0].padStart(2, '0')
-                    "$hour:00:00"
-                }
-                2 -> {
-                    val hour = parts[0].padStart(2, '0')
-                    val min = parts[1].padStart(2, '0')
-                    "$hour:$min:00"
-                }
-                else -> "$defaultTime:00"
+                1 -> "${parts[0].padStart(2, '0')}:00:00"
+                2 -> "${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}:00"
+                else -> if (trimmed.length == 8) trimmed else "$defaultTime:00"
             }
         }
 
@@ -641,13 +646,13 @@ class MainActivity : AppCompatActivity() {
             val rawStartTime = etStartTime?.text?.toString() ?: ""
             val rawEndTime = etEndTime?.text?.toString() ?: ""
 
-            if (name.isEmpty()) {
-                Toast.makeText(this, "일정 이름을 입력해 주세요!", Toast.LENGTH_SHORT).show()
+            if (name.isEmpty() || selectedDays.isEmpty()) {
+                Toast.makeText(this, "이름과 요일을 입력해 주세요!", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
 
-            val formattedStartTime = formatTimeString(rawStartTime, "10:00")
-            val formattedEndTime = formatTimeString(rawEndTime, "12:00")
+            val formattedStartTime = formatTimeString(rawStartTime, "15:00")
+            val formattedEndTime = formatTimeString(rawEndTime, "18:00")
 
             bottomSheetDialog.dismiss()
 
@@ -655,16 +660,16 @@ class MainActivity : AppCompatActivity() {
                 lifecycleScope.launch {
                     try {
                         var successCount = 0
-                        // 🚀 선택된 여러 요일에 대해 각각 생성 API 호출
                         selectedDays.forEach { dayCode ->
-                            val targetDayIso = convertDayToIsoDate(dayCode)
-                            val baseDate = targetDayIso.split("T")[0]
+                            val targetDayIso = convertDayToIsoDate(dayCode, formattedStartTime)
+                            val targetEndDayIso = convertDayToIsoDate(dayCode, formattedEndTime)
 
                             val apiRequest = CreateFixedScheduleApiRequest(
                                 userId = 1L,
                                 title = name,
-                                startTime = "${baseDate}T$formattedStartTime",
-                                endTime = "${baseDate}T$formattedEndTime",
+                                startTime = targetDayIso,
+                                endTime = targetEndDayIso,
+                                repeat = true,
                                 repeatDay = dayCode
                             )
 
@@ -673,14 +678,11 @@ class MainActivity : AppCompatActivity() {
                         }
 
                         if (successCount > 0) {
-                            Toast.makeText(this@MainActivity, "'$name' 고정 일정 ${successCount}개 요일 등록 완료! ✨", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this@MainActivity, "'$name' 고정 일정 등록 완료!", Toast.LENGTH_SHORT).show()
                             loadWeeklySchedulesFromServer()
-                        } else {
-                            Toast.makeText(this@MainActivity, "등록 실패 (서버 응답 오류)", Toast.LENGTH_SHORT).show()
                         }
                     } catch (e: Exception) {
                         e.printStackTrace()
-                        Toast.makeText(this@MainActivity, "등록 실패: ${e.message}", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -694,42 +696,56 @@ class MainActivity : AppCompatActivity() {
         val btnNext = findViewSafely<Button>("btnReplayNext")
 
         btnNext?.setOnClickListener {
-            if (currentStepIndex < replayChanges.size - 1) {
+            if (currentStepIndex < currentGeneratedSchedules.size - 1) {
                 currentStepIndex++
-                applyReplayStep(replayChanges[currentStepIndex])
+                applyReplayStepByDto(currentGeneratedSchedules[currentStepIndex], isForward = true)
             }
         }
+
         btnPrev?.setOnClickListener {
-            if (currentStepIndex > 0) {
+            if (currentStepIndex >= 0) {
+                val dtoToRemove = currentGeneratedSchedules[currentStepIndex]
                 currentStepIndex--
-                applyReplayStep(replayChanges[currentStepIndex])
+                applyReplayStepByDto(dtoToRemove, isForward = false)
             }
         }
+
         btnPlay?.setOnClickListener {
             if (isPlaying) {
                 stopAutoPlay()
                 btnPlay.text = "▶ 재생"
             } else {
-                if (currentStepIndex >= replayChanges.size - 1) currentStepIndex = -1
+                if (currentStepIndex >= currentGeneratedSchedules.size - 1) {
+                    resetAndStartReplay()
+                } else {
+                    startAutoPlay()
+                }
                 btnPlay.text = "⏸ 정지"
-                startAutoPlay()
             }
         }
+    }
+
+    private fun resetAndStartReplay() {
+        stopAutoPlay()
+        currentStepIndex = -1
+        clearAllContainers()
+
+        currentFixedSchedules.forEach { renderFixedScheduleCard(it) }
+        startAutoPlay()
     }
 
     private fun startAutoPlay() {
         isPlaying = true
         playRunnable = object : Runnable {
             override fun run() {
-                if (currentStepIndex < replayChanges.size - 1) {
+                if (currentStepIndex < currentGeneratedSchedules.size - 1) {
                     currentStepIndex++
-                    applyReplayStep(replayChanges[currentStepIndex])
-                    handler.postDelayed(this, 1800)
+                    applyReplayStepByDto(currentGeneratedSchedules[currentStepIndex], isForward = true)
+                    handler.postDelayed(this, 1200)
                 } else {
                     stopAutoPlay()
-                    val btnPlay = findViewSafely<Button>("btnReplayPlay")
-                    btnPlay?.text = "▶ 재생"
-                    Toast.makeText(this@MainActivity, "모든 AI 일정 배치가 완료되었습니다! ✨", Toast.LENGTH_SHORT).show()
+                    findViewSafely<Button>("btnReplayPlay")?.text = "▶ 재생"
+                    Toast.makeText(this@MainActivity, "AI 일정 배치 완료! ✨", Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -741,53 +757,78 @@ class MainActivity : AppCompatActivity() {
         playRunnable?.let { handler.removeCallbacks(it) }
     }
 
-    private fun applyReplayStep(change: ScheduleChangeDto) {
+    private fun applyReplayStepByDto(gen: GeneratedScheduleDto, isForward: Boolean) {
         val tvAiFeedback = findViewSafely<TextView>("tvAiFeedback")
-        tvAiFeedback?.text = "[STEP ${change.sequence}] ${change.title}\n${change.reason}"
-
-        val dayKey = convertDayToKey(change.afterStartTime ?: "MON")
+        val dayKey = convertDayToKey(gen.startTime)
         val targetContainer = findViewSafely<LinearLayout>("container$dayKey") ?: return
 
-        var isAlreadyExist = false
-        for (i in 0 until targetContainer.childCount) {
-            val card = targetContainer.getChildAt(i) as? CardView
-            val tv = card?.getChildAt(0) as? TextView
-            if (tv?.text?.contains(change.title) == true) {
-                isAlreadyExist = true
-                break
-            }
+        val totalBlocks = currentGeneratedSchedules.count { it.taskId == gen.taskId }
+        val displayTitle = when {
+            gen.title.startsWith("[") -> gen.title
+            gen.stepOrder > 0 && totalBlocks > 1 -> "[${gen.stepOrder}/$totalBlocks]\n${gen.title}"
+            gen.stepOrder > 0 -> "[${gen.stepOrder}단계]\n${gen.title}"
+            else -> gen.title
         }
 
-        if (!isAlreadyExist) {
-            val newCard = CardView(this).apply {
-                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(48)).apply {
-                    setMargins(dpToPx(1), dpToPx(3), dpToPx(1), dpToPx(3))
-                }
-                radius = dpToPx(8).toFloat()
-                cardElevation = 2f
-                setCardBackgroundColor(Color.parseColor("#283593"))
+        if (isForward) {
+            val stepSeq = currentStepIndex + 1
+            tvAiFeedback?.text = "[STEP $stepSeq/${currentGeneratedSchedules.size}] $displayTitle\n💡 AI가 최적의 시간대로 배치했습니다."
 
-                tag = mapOf(
-                    "blockId" to change.blockId,
-                    "taskId" to change.taskId.toString(),
-                    "type" to "AI"
-                )
+            var isAlreadyExist = false
+            for (i in 0 until targetContainer.childCount) {
+                val card = targetContainer.getChildAt(i) as? CardView
+                val tagData = card?.tag as? ScheduleCardTag
+                if (tagData != null && (
+                            (!tagData.blockId.isNullOrEmpty() && tagData.blockId == gen.blockId) ||
+                                    (tagData.taskId != null && gen.taskId != null && tagData.taskId == gen.taskId && tagData.startMin == parseTimeToMinutes(gen.startTime))
+                            )) {
+                    isAlreadyExist = true
+                    break
+                }
             }
-            val newTextView = TextView(this).apply {
-                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT)
-                text = "${change.title}\n(AI 추천)"
-                setTextColor(Color.WHITE)
-                textSize = 9.5f
-                gravity = Gravity.CENTER
+
+            if (!isAlreadyExist) {
+                renderGeneratedScheduleCard(gen)
             }
-            newCard.addView(newTextView)
-            enableDragAndDrop(newCard)
-            targetContainer.addView(newCard)
+
+        } else {
+            if (currentStepIndex >= 0) {
+                val prevStep = currentGeneratedSchedules[currentStepIndex]
+                val prevTotal = currentGeneratedSchedules.count { it.taskId == prevStep.taskId }
+                val prevTitle = when {
+                    prevStep.title.startsWith("[") -> prevStep.title
+                    prevStep.stepOrder > 0 && prevTotal > 1 -> "[${prevStep.stepOrder}/$prevTotal]\n${prevStep.title}"
+                    prevStep.stepOrder > 0 -> "[${prevStep.stepOrder}단계]\n${prevStep.title}"
+                    else -> prevStep.title
+                }
+
+                tvAiFeedback?.text = "[STEP ${currentStepIndex + 1}/${currentGeneratedSchedules.size}] $prevTitle"
+            } else {
+                tvAiFeedback?.text = "🤖 배치 시작 전 단계입니다."
+            }
+
+            var targetViewToRemove: View? = null
+            for (i in 0 until targetContainer.childCount) {
+                val child = targetContainer.getChildAt(i)
+                val tagData = child.tag as? ScheduleCardTag
+                if (tagData != null && (
+                            (!tagData.blockId.isNullOrEmpty() && tagData.blockId == gen.blockId) ||
+                                    (tagData.taskId != null && gen.taskId != null && tagData.taskId == gen.taskId && tagData.startMin == parseTimeToMinutes(gen.startTime))
+                            )) {
+                    targetViewToRemove = child
+                    break
+                }
+            }
+
+            if (targetViewToRemove != null) {
+                targetContainer.removeView(targetViewToRemove)
+                recalculateContainerLayout(targetContainer)
+            }
         }
     }
 
+    // ★ [수정] 바텀시트 열릴 때 실제 생성된 세부 일정 단계 수 기준으로 유연하게 동기화
     private fun showAiDecompositionBottomSheet(todo: Todo) {
-        val stepsCount = if (todo.desiredSteps > 0) todo.desiredSteps else 1
         val bottomSheetDialog = BottomSheetDialog(this)
         val completedSteps = completedStepsMap.getOrPut(todo.id) { mutableSetOf() }
 
@@ -796,6 +837,14 @@ class MainActivity : AppCompatActivity() {
             setPadding(dpToPx(20), dpToPx(24), dpToPx(20), dpToPx(24))
             setBackgroundColor(Color.WHITE)
         }
+
+        val matchedSchedules = currentGeneratedSchedules.filter { gen ->
+            val isTaskIdMatch = gen.taskId?.toString() == todo.id
+            val isTitleMatch = gen.title.contains(todo.name, ignoreCase = true) || todo.name.contains(gen.title, ignoreCase = true)
+            isTaskIdMatch || isTitleMatch
+        }.sortedBy { it.stepOrder }
+
+        val stepsCount = if (matchedSchedules.isNotEmpty()) matchedSchedules.size else if (todo.desiredSteps > 0) todo.desiredSteps else 1
 
         val tvSubTitle = TextView(this).apply {
             text = "🤖 RePlan AI 추천 계획\n[${todo.name}] (${completedSteps.size}/${stepsCount}단계 완료)"
@@ -806,38 +855,41 @@ class MainActivity : AppCompatActivity() {
         }
         rootLayout.addView(tvSubTitle)
 
-        val matchedSchedules = if (todo.subSteps.isNotEmpty()) {
-            emptyList()
-        } else {
-            currentGeneratedSchedules.filter { gen ->
-                val isTaskIdMatch = gen.taskId?.toString() == todo.id
-                val isTitleMatch = gen.title.contains(todo.name, ignoreCase = true) ||
-                        todo.name.contains(gen.title, ignoreCase = true) ||
-                        todo.name.split(" ").any { word -> word.length > 1 && gen.title.contains(word, ignoreCase = true) }
-                isTaskIdMatch || isTitleMatch
-            }.sortedBy { it.stepOrder }
-        }
-
-        val matchedTitles = if (todo.subSteps.isNotEmpty()) {
-            todo.subSteps
-        } else {
+        val actualStepsList = if (matchedSchedules.isNotEmpty()) {
             matchedSchedules.map { it.title }
-        }
-
-        val actualStepsList = if (matchedTitles.isNotEmpty()) {
-            matchedTitles
         } else {
-            List(stepsCount) { index -> "${index + 1}단계: [${todo.name}] AI 추천 세부 실행" }
+            List(stepsCount) { index -> "${index + 1}단계: [${todo.name}] AI 추천 실행" }
         }
 
-        actualStepsList.take(stepsCount).forEachIndexed { index, stepText ->
+        actualStepsList.forEachIndexed { index, stepText ->
             val checkBox = CheckBox(this).apply {
                 text = stepText
                 textSize = 13f
+                setPadding(dpToPx(4), dpToPx(8), dpToPx(4), dpToPx(8))
                 isChecked = completedSteps.contains(index)
+
+                if (isChecked) {
+                    paintFlags = paintFlags or Paint.STRIKE_THRU_TEXT_FLAG
+                    setTextColor(Color.parseColor("#888888"))
+                } else {
+                    paintFlags = paintFlags and Paint.STRIKE_THRU_TEXT_FLAG.inv()
+                    setTextColor(Color.parseColor("#333333"))
+                }
+
                 setOnCheckedChangeListener { _, isChecked ->
                     if (isChecked) completedSteps.add(index) else completedSteps.remove(index)
                     tvSubTitle.text = "🤖 RePlan AI 추천 계획\n[${todo.name}] (${completedSteps.size}/${actualStepsList.size}단계 완료)"
+
+                    if (isChecked) {
+                        paintFlags = paintFlags or Paint.STRIKE_THRU_TEXT_FLAG
+                        setTextColor(Color.parseColor("#888888"))
+                    } else {
+                        paintFlags = paintFlags and Paint.STRIKE_THRU_TEXT_FLAG.inv()
+                        setTextColor(Color.parseColor("#333333"))
+                    }
+
+                    val isAllDone = completedSteps.size == actualStepsList.size
+                    updateTodoCardCompletion(todo, isAllDone)
                 }
             }
             rootLayout.addView(checkBox)
@@ -847,22 +899,62 @@ class MainActivity : AppCompatActivity() {
         bottomSheetDialog.show()
     }
 
+    private fun updateTodoCardCompletion(targetTodo: Todo, isAllCompleted: Boolean) {
+        val index = todoList.indexOfFirst { it.id == targetTodo.id }
+        if (index != -1) {
+            val todoItem = todoList[index]
+            todoItem.isCompleted = isAllCompleted
+
+            if (isAllCompleted) {
+                todoList.removeAt(index)
+                todoList.add(todoItem)
+
+                lifecycleScope.launch {
+                    try {
+                        val taskIdLong = targetTodo.id.toLongOrNull()
+                        if (taskIdLong != null) {
+                            ApiClient.service.updateTaskStatus(
+                                taskId = taskIdLong,
+                                completed = true
+                            )
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+
+                Toast.makeText(this, "'${targetTodo.name}' 일정이 모두 완료되었습니다! 🎉", Toast.LENGTH_SHORT).show()
+            }
+
+            if (::todoAdapter.isInitialized) {
+                todoAdapter.notifyDataSetChanged()
+            }
+        }
+    }
+
     private fun convertDayToKey(rawDayStr: String): String {
         if (rawDayStr.isEmpty()) return "Mon"
+
+        val upperRaw = rawDayStr.uppercase(Locale.KOREA)
+
+        when {
+            upperRaw.contains("MON") || upperRaw.contains("월") -> return "Mon"
+            upperRaw.contains("TUE") || upperRaw.contains("화") -> return "Tue"
+            upperRaw.contains("WED") || upperRaw.contains("수") -> return "Wed"
+            upperRaw.contains("THU") || upperRaw.contains("목") -> return "Thu"
+            upperRaw.contains("FRI") || upperRaw.contains("금") -> return "Fri"
+            upperRaw.contains("SAT") || upperRaw.contains("토") -> return "Sat"
+            upperRaw.contains("SUN") || upperRaw.contains("일") -> return "Sun"
+        }
 
         if (rawDayStr.contains("-")) {
             try {
                 val datePart = rawDayStr.split("T")[0]
                 val parts = datePart.split("-")
                 if (parts.size == 3) {
-                    val year = parts[0].toInt()
-                    val month = parts[1].toInt() - 1
-                    val day = parts[2].toInt()
-
-                    val cal = Calendar.getInstance().apply {
-                        set(year, month, day)
+                    val cal = Calendar.getInstance(Locale.KOREA).apply {
+                        set(parts[0].toInt(), parts[1].toInt() - 1, parts[2].toInt())
                     }
-
                     return when (cal.get(Calendar.DAY_OF_WEEK)) {
                         Calendar.MONDAY -> "Mon"
                         Calendar.TUESDAY -> "Tue"
@@ -879,29 +971,14 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        return when {
-            rawDayStr.contains("MON", true) || rawDayStr.contains("월") -> "Mon"
-            rawDayStr.contains("TUE", true) || rawDayStr.contains("화") -> "Tue"
-            rawDayStr.contains("WED", true) || rawDayStr.contains("수") -> "Wed"
-            rawDayStr.contains("THU", true) || rawDayStr.contains("목") -> "Thu"
-            rawDayStr.contains("FRI", true) || rawDayStr.contains("금") -> "Fri"
-            rawDayStr.contains("SAT", true) || rawDayStr.contains("토") -> "Sat"
-            rawDayStr.contains("SUN", true) || rawDayStr.contains("일") -> "Sun"
-            else -> "Mon"
-        }
+        return "Mon"
     }
 
-    private fun getCurrentFormattedDateTime(endOfDay: Boolean = false): String {
-        val calendar = Calendar.getInstance()
-        val dateSdf = SimpleDateFormat("yyyy-MM-dd", Locale.KOREA)
-        val dateStr = dateSdf.format(calendar.time)
-        return if (endOfDay) "${dateStr}T23:59:59" else "${dateStr}T10:00:00"
-    }
-
-    private fun convertDayToIsoDate(dayKey: String): String {
+    private fun convertDayToIsoDate(dayKey: String, timeStr: String = "10:00:00"): String {
         val calendar = currentWeekCalendar.clone() as Calendar
+        calendar.firstDayOfWeek = Calendar.MONDAY
 
-        val targetDayOfWeek = when (dayKey) {
+        val targetDayOfWeek = when (dayKey.uppercase(Locale.KOREA)) {
             "MON" -> Calendar.MONDAY
             "TUE" -> Calendar.TUESDAY
             "WED" -> Calendar.WEDNESDAY
@@ -914,9 +991,8 @@ class MainActivity : AppCompatActivity() {
 
         calendar.set(Calendar.DAY_OF_WEEK, targetDayOfWeek)
         val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.KOREA)
-        val formattedDate = sdf.format(calendar.time)
-
-        return "${formattedDate}T10:00:00"
+        val cleanTime = if (timeStr.length == 5) "$timeStr:00" else timeStr
+        return "${sdf.format(calendar.time)}T$cleanTime"
     }
 
     private fun clearAllContainers() {
@@ -938,7 +1014,7 @@ class MainActivity : AppCompatActivity() {
                 afterStartTime = dto.startTime,
                 afterEndTime = dto.endTime,
                 reasonCode = dto.reasonCode ?: "OPTIMAL",
-                reason = dto.reason ?: "💡 AI가 가장 몰입도가 높은 시간대로 배치했습니다."
+                reason = dto.reason ?: "💡 AI가 최적의 시간대로 배치했습니다."
             )
         }
     }
@@ -963,7 +1039,7 @@ class MainActivity : AppCompatActivity() {
         Handler(Looper.getMainLooper()).postDelayed({
             dialog.dismiss()
             onComplete()
-        }, 1000)
+        }, 800)
     }
 
     private fun setupDragAndDropContainers() {
@@ -973,46 +1049,56 @@ class MainActivity : AppCompatActivity() {
         containers.forEach { container ->
             container.setOnDragListener { v, event ->
                 val draggedView = event.localState as? View
+                val targetContainer = v as? LinearLayout ?: return@setOnDragListener false
+                val sourceContainer = draggedView?.parent as? LinearLayout
+
                 when (event.action) {
                     DragEvent.ACTION_DRAG_STARTED -> true
-                    DragEvent.ACTION_DRAG_ENTERED -> { v.setBackgroundColor(Color.parseColor("#E8EAF6")); true }
-                    DragEvent.ACTION_DRAG_EXITED -> { v.setBackgroundColor(Color.TRANSPARENT); true }
+                    DragEvent.ACTION_DRAG_ENTERED -> { targetContainer.setBackgroundColor(Color.parseColor("#E8EAF6")); true }
+                    DragEvent.ACTION_DRAG_EXITED -> { targetContainer.setBackgroundColor(Color.TRANSPARENT); true }
                     DragEvent.ACTION_DROP -> {
-                        v.setBackgroundColor(Color.TRANSPARENT)
+                        targetContainer.setBackgroundColor(Color.TRANSPARENT)
                         if (draggedView != null) {
-                            (draggedView.parent as? LinearLayout)?.removeView(draggedView)
-                            (v as LinearLayout).addView(draggedView)
+                            sourceContainer?.removeView(draggedView)
+
+                            val dropY = event.y
+                            val rawMinutes = (dropY / (resources.displayMetrics.density * MINUTE_FACTOR)).toInt()
+                            val snappedMinutes = ((rawMinutes + 15) / 30 * 30).coerceIn(0, 1380)
+
+                            val tagData = (draggedView.tag as? ScheduleCardTag) ?: ScheduleCardTag()
+                            val duration = (tagData.endMin - tagData.startMin).coerceAtLeast(30)
+
+                            tagData.startMin = snappedMinutes
+                            tagData.endMin = snappedMinutes + duration
+                            draggedView.tag = tagData
+
+                            targetContainer.addView(draggedView)
                             draggedView.visibility = View.VISIBLE
 
-                            val targetContainerId = resources.getResourceEntryName(v.id)
+                            sourceContainer?.let { recalculateContainerLayout(it) }
+                            recalculateContainerLayout(targetContainer)
+
+                            val hour = snappedMinutes / 60
+                            val min = snappedMinutes % 60
+                            val formattedTime = String.format(Locale.KOREA, "%02d:%02d:00", hour, min)
+
+                            val targetContainerId = resources.getResourceEntryName(targetContainer.id)
                             val dayKey = targetContainerId.replace("container", "").uppercase()
+                            val calculatedStartTime = convertDayToIsoDate(dayKey, formattedTime)
 
-                            val calculatedStartTime = convertDayToIsoDate(dayKey)
-                            val calculatedEndTime = convertDayToIsoDate(dayKey).replace("T10:00:00", "T11:00:00")
-
-                            val tagMap = draggedView.tag as? Map<*, *>
-                            val taskIdRaw = tagMap?.get("taskId")
-                            val taskIdLong = when (taskIdRaw) {
-                                is Long -> taskIdRaw
-                                is String -> taskIdRaw.toLongOrNull()
-                                else -> null
-                            }
-                            val blockId = tagMap?.get("blockId")?.toString() ?: ""
-
-                            if (blockId.isNotEmpty() || taskIdLong != null) {
+                            if (!tagData.blockId.isNullOrEmpty() || tagData.taskId != null) {
                                 requestUpdateScheduleStatus(
-                                    taskId = taskIdLong,
-                                    blockId = blockId,
+                                    taskId = tagData.taskId,
+                                    blockId = tagData.blockId,
                                     locked = true,
-                                    startTime = calculatedStartTime,
-                                    endTime = calculatedEndTime
+                                    startTime = calculatedStartTime
                                 )
                             }
                             true
                         } else false
                     }
                     DragEvent.ACTION_DRAG_ENDED -> {
-                        v.setBackgroundColor(Color.TRANSPARENT)
+                        targetContainer.setBackgroundColor(Color.TRANSPARENT)
                         if (!event.result && draggedView != null) {
                             draggedView.post { draggedView.visibility = View.VISIBLE }
                         }
@@ -1021,6 +1107,48 @@ class MainActivity : AppCompatActivity() {
                     else -> false
                 }
             }
+        }
+    }
+
+    private fun recalculateContainerLayout(container: LinearLayout) {
+        val cardViews = mutableListOf<View>()
+
+        for (i in 0 until container.childCount) {
+            val child = container.getChildAt(i)
+            if (child != null) {
+                cardViews.add(child)
+            }
+        }
+
+        cardViews.sortBy { childView ->
+            val tagData = childView.tag as? ScheduleCardTag
+            tagData?.startMin ?: 0
+        }
+
+        container.removeAllViews()
+        var currentOffsetPx = 0
+
+        cardViews.forEach { childView ->
+            container.addView(childView)
+
+            val tagData = (childView.tag as? ScheduleCardTag) ?: ScheduleCardTag()
+
+            val startMin = tagData.startMin
+            val endMin = tagData.endMin
+            val durationMinutes = (endMin - startMin).coerceAtLeast(30)
+
+            val targetStartPx = dpToPx((startMin * MINUTE_FACTOR).toInt())
+            val marginTopPx = (targetStartPx - currentOffsetPx).coerceAtLeast(0)
+            val cardHeightPx = dpToPx((durationMinutes * MINUTE_FACTOR).toInt().coerceAtLeast(24))
+
+            val params = (childView.layoutParams as? LinearLayout.LayoutParams)
+                ?: LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, cardHeightPx)
+
+            params.height = cardHeightPx
+            params.topMargin = marginTopPx
+            childView.layoutParams = params
+
+            currentOffsetPx = targetStartPx + cardHeightPx
         }
     }
 

@@ -1,6 +1,7 @@
 package com.example.replan
 
 import android.graphics.Color
+import android.graphics.Paint
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -9,7 +10,6 @@ import androidx.recyclerview.widget.RecyclerView
 
 class TodoAdapter(
     private val todoList: List<Todo>,
-    // 🌟 [추가] 카드가 클릭되었을 때 메인화면에 알려주는 리스너를 매개변수로 받습니다!
     private val onItemClick: (Todo) -> Unit
 ) : RecyclerView.Adapter<TodoAdapter.TodoViewHolder>() {
 
@@ -32,7 +32,7 @@ class TodoAdapter(
         holder.tvTime.text = "⏳ ${todo.expectedTime}시간 소요"
         holder.tvPriority.text = "우선순위: ${todo.priority}"
 
-        // 우선순위별로 색깔 다르게 주기
+        // 우선순위별 색상 지정
         when (todo.priority) {
             "상" -> {
                 holder.tvPriority.setBackgroundColor(Color.parseColor("#FFEBEE"))
@@ -48,14 +48,14 @@ class TodoAdapter(
             }
         }
 
-        // 마감 기한 텍스트 동적 분기
+        // 마감 기한 텍스트
         holder.tvDeadline.text = when (todo.deadlineType) {
             "DATE" -> "⏰ 특정 날짜 기준 마감"
             "SCHEDULE" -> "⏰ 완료 목표: ${todo.specificScheduleName} 전 완료"
             else -> "⏰ 마감 없음"
         }
 
-        // AI 작업 분해 뱃지 활성화 여부
+        // AI 작업 분해 뱃지
         if (todo.desiredSteps > 0) {
             holder.tvAiSteps.visibility = View.VISIBLE
             holder.tvAiSteps.text = "🤖 AI ${todo.desiredSteps}단계 작업 분해 요청됨"
@@ -63,7 +63,16 @@ class TodoAdapter(
             holder.tvAiSteps.visibility = View.GONE
         }
 
-        // 🌟 [추가] 아이템 카드 전체 영역 터치 이벤트 연결!
+        // ★ [완료 상태 스타일 처리] 흐려짐(투명도 0.45) & 취소선 적용
+        if (todo.isCompleted) {
+            holder.itemView.alpha = 0.45f
+            holder.tvName.paintFlags = holder.tvName.paintFlags or Paint.STRIKE_THRU_TEXT_FLAG
+        } else {
+            holder.itemView.alpha = 1.0f
+            holder.tvName.paintFlags = holder.tvName.paintFlags and Paint.STRIKE_THRU_TEXT_FLAG.inv()
+        }
+
+        // 아이템 클릭 리스너
         holder.itemView.setOnClickListener {
             onItemClick(todo)
         }

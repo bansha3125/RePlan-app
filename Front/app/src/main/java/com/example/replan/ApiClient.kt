@@ -8,14 +8,11 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.PATCH
 import retrofit2.http.POST
+import retrofit2.http.Path
 import retrofit2.http.Query
 import java.util.concurrent.TimeUnit
-
-// =========================================================================
-// DTO 데이터 클래스
-// =========================================================================
-
 
 // =========================================================================
 // 백엔드 API 서비스 인터페이스
@@ -46,7 +43,7 @@ interface ScheduleApiService {
      */
     @POST("schedules/replan")
     suspend fun replanSchedules(
-        @Body request: ReplanScheduleApiRequest
+        @Body request: ReplanApiRequest
     ): Response<ResponseBody>
 
     /**
@@ -64,6 +61,16 @@ interface ScheduleApiService {
     @POST("schedules/tasks")
     suspend fun createTask(
         @Body request: CreateTaskApiRequest
+    ): Response<ResponseBody>
+
+    /**
+     * 할 일 완료 상태 업데이트 API
+     * PATCH /schedules/tasks/{taskId}?completed=true
+     */
+    @PATCH("schedules/tasks/{taskId}")
+    suspend fun updateTaskStatus(
+        @Path("taskId") taskId: Long,
+        @Query("completed") completed: Boolean
     ): Response<ResponseBody>
 
     /**
