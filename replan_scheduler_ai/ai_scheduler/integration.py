@@ -69,7 +69,124 @@ def _reason_code_from_reason(
 
 def _block_to_backend(
     block: dict[str, Any],
+    step_metadata: Optional[
+        dict[str, Any]
+    ] = None,
 ) -> dict[str, Any]:
+
+    source = str(
+        block.get(
+            "source",
+            "generated",
+        )
+    ).upper()
+
+    raw_task_id = block.get(
+        "task_id"
+    )
+
+    task_id = raw_task_id
+
+    original_block_id = str(
+        block["block_id"]
+    )
+
+    step_order = (
+        _extract_step_order(
+            original_block_id
+        )
+        if source == "GENERATED"
+        else None
+    )
+
+    metadata = None
+
+    if (
+        source == "GENERATED"
+        and raw_task_id is not None
+        and step_metadata
+    ):
+        metadata = step_metadata.get(
+            str(raw_task_id)
+        )
+
+    # Gemini 세부 단계인 경우
+    if metadata is not None:
+
+        task_id = str(
+            metadata["parentTaskId"]
+        )
+
+        step_order = int(
+            metadata["stepOrder"]
+        )
+
+        block_id = (
+            f"generated:{task_id}:"
+            f"step-{step_order}"
+        )
+
+    # 일반 AI 일정
+    elif (
+        source == "GENERATED"
+        and raw_task_id is not None
+    ):
+        block_id = (
+            f"generated:{raw_task_id}:"
+            f"step-{step_order}"
+        )
+
+    else:
+        block_id = original_block_id
+
+    start_time = _dt(
+        block["start"]
+    )
+
+    end_time = _dt(
+        block["end"]
+    )
+
+    reason = block.get("reason")
+
+    return {
+        "blockId": block_id,
+        "taskId": task_id,
+        "title": block["title"],
+        "stepOrder": step_order,
+
+        "startTime": start_time.isoformat(
+            timespec="seconds"
+        ),
+
+        "endTime": end_time.isoformat(
+            timespec="seconds"
+        ),
+
+        "source": source,
+
+        "locked": bool(
+            block.get(
+                "locked",
+                False,
+            )
+        ),
+
+        "completed": bool(
+            block.get(
+                "completed",
+                False,
+            )
+        ),
+
+        "reasonCode": (
+            _reason_code_from_reason(
+                reason
+            )
+        ),
+
+        "reason": reason,
+    }
     """
     스케줄러 내부 snake_case 결과를
     백엔드용 camelCase 결과로 변환한다.
@@ -524,13 +641,26 @@ def schedule_api_from_payload(
 
     raw_result = schedule_from_payload(payload)
 
+    step_metadata = payload.get(
+        "step_metadata",
+        {},
+    )
     schedules = [
-        _block_to_backend(block)
-        for block in raw_result.get("blocks", [])
+        _block_to_backend(
+            block,
+            step_metadata,
+        )
+        for block in raw_result.get(
+            "blocks",
+            [],
+        )
     ]
 
     preserved_schedules = [
-        _block_to_backend(block)
+        _block_to_backend(
+            block,
+            step_metadata,
+        )
         for block in raw_result.get(
             "preserved_blocks",
             [],

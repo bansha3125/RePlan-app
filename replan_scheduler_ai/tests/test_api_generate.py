@@ -145,6 +145,171 @@ class TestAPIGenerate(BaseAPITest):
             msg=f"생성 일정이 고정 일정과 겹침: {generated_task}",
         )
 
+    def test_ai_decomposition_3_5_7(self):
 
+        from datetime import (
+            datetime,
+            timedelta,
+            time,
+        )
+
+        test_date = (
+            datetime.now()
+            + timedelta(days=1)
+        ).date()
+
+        week_start = (
+            test_date
+            - timedelta(
+                days=test_date.weekday()
+            )
+        )
+
+        week_end = (
+            week_start
+            + timedelta(days=6)
+        )
+
+        for desired_steps in [3, 5, 7]:
+
+            with self.subTest(
+                desired_steps=desired_steps
+            ):
+
+                body = {
+                    "requestId": (
+                        f"decompose-test-"
+                        f"{desired_steps}"
+                    ),
+
+                    "userId": 1,
+
+                    "weekStartDate": (
+                        week_start.isoformat()
+                    ),
+
+                    "weekEndDate": (
+                        week_end.isoformat()
+                    ),
+
+                    "timezone": "Asia/Seoul",
+
+                    "tasks": [
+                        {
+                            "taskId": 100,
+                            "title": (
+                                "경진대회 발표 준비"
+                            ),
+
+                            "estimatedMinutes": (
+                                desired_steps * 30
+                            ),
+
+                            "deadline": (
+                                datetime.combine(
+                                    test_date,
+                                    time(21, 0),
+                                ).isoformat()
+                            ),
+
+                            "priority": 5,
+                            "difficulty": 3,
+                            "focusRequired": 4,
+
+                            "useAiDecomposition": True,
+                            "desiredSteps": (
+                                desired_steps
+                            ),
+
+                            "postponeCount": 0,
+                            "completedMinutes": 0,
+                            "completed": False,
+                            "prerequisiteTaskIds": [],
+                        }
+                    ],
+
+                    "fixedSchedules": [],
+                    "existingSchedules": [],
+                }
+
+                response = self.client.post(
+                    "/schedules/generate",
+                    json=body,
+                )
+
+                self.assertEqual(
+                    response.status_code,
+                    200,
+                    msg=response.text,
+                )
+
+                data = response.json()
+
+                schedules = [
+                    schedule
+                    for schedule
+                    in data.get(
+                        "schedules",
+                        [],
+                    )
+                    if str(
+                        schedule.get("taskId")
+                    ) == "100"
+                ]
+
+                print(
+                    f"\n=== {desired_steps}단계 ==="
+                )
+
+                for schedule in schedules:
+                    print(
+                        schedule["stepOrder"],
+                        schedule["title"],
+                        schedule["startTime"],
+                        "~",
+                        schedule["endTime"],
+                    )
+
+                self.assertEqual(
+                    len(schedules),
+                    desired_steps,
+                    msg=data,
+                )
+
+                step_orders = sorted(
+                    schedule["stepOrder"]
+                    for schedule in schedules
+                )
+
+                self.assertEqual(
+                    step_orders,
+                    list(
+                        range(
+                            1,
+                            desired_steps + 1,
+                        )
+                    ),
+                )
+
+                self.assertTrue(
+                    all(
+                        str(
+                            schedule["blockId"]
+                        ).startswith(
+                            "generated:100:step-"
+                        )
+                        for schedule in schedules
+                    )
+                )
+
+        actual_orders = [
+            schedule["stepOrder"]
+            for schedule in schedules
+        ]
+
+        self.assertEqual(
+            actual_orders,
+            list(range(1, desired_steps + 1)),
+        )
 if __name__ == "__main__":
     unittest.main()
