@@ -49,7 +49,17 @@ public class ScheduleService {
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
 
-    public WeeklyScheduleResponse getWeeklySchedules(Long userId) {
+    public WeeklyScheduleResponse getWeeklySchedules(Long userId, String weekStartDateParam) {
+        LocalDate weekStartDate = (weekStartDateParam != null && !weekStartDateParam.isBlank())
+                ? LocalDate.parse(weekStartDateParam)
+                : getCurrentWeekStart();
+
+        LocalDate weekEndDate = weekStartDate.plusDays(6);
+
+        // 날짜 범위를 LocalDateTime으로 변환 (시작일 00:00:00 ~ 종료일 23:59:59)
+        LocalDateTime startDateTime = weekStartDate.atStartOfDay();
+        LocalDateTime endDateTime = weekEndDate.atTime(23, 59, 59);
+
         // 1. 고정 일정 정렬 (1순위: 시작시간, 2순위: 제목 오름차순 등 필요시 설정)
         List<FixedScheduleDto> fixedDtos = fixedRepository.findByUserId(userId)
                 .stream()
@@ -66,7 +76,7 @@ public class ScheduleService {
 
         // 2. 생성된 일정 정렬 (1순위: 시작시간 오름차순, 2순위: stepOrder 순서 등)
         List<GeneratedScheduleDto> generatedDtos =
-                generatedRepository.findByUserId(userId)
+                generatedRepository.findByUserIdAndStartTimeBetween(userId, startDateTime, endDateTime)
                         .stream()
                         .sorted(Comparator.comparing(GeneratedSchedule::getStartTime)
                                 .thenComparing(GeneratedSchedule::getStepOrder, Comparator.nullsLast(Comparator.naturalOrder())))
@@ -524,5 +534,48 @@ public class ScheduleService {
         Task task = taskRepository.findById(taskId)
                 .orElseThrow(() -> new IllegalArgumentException("해당 Task가 없습니다. id=" + taskId));
         task.updateCompleted(completed);
+    }
+
+    @Transactional
+    public void updateTask(Long taskId, TaskRequest request) {
+        Task task = taskRepository.findById(taskId)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 할 일입니다: " + taskId));
+
+        task.update(
+                request.getTitle(),
+                LocalDateTime.parse(request.getDeadline()),
+                request.getEstimatedMinutes(),
+                request.isUseAiDecomposition(),
+                request.getDesiredSteps(),
+                request.getPriority() != null ? request.getPriority() : 2
+        );
+
+        taskRepository.save(task);
+    }
+
+    @Transactional
+    public void deleteTask(Long taskId, Long userId) {
+        // 1. 관련 AI 생성 일정 먼저 삭제 (고아 데이터 방지)
+        generatedRepository.deleteByTaskId(taskId);
+
+        // 2. 본체 Task 삭제
+        taskRepository.deleteById(taskId);
+    }
+
+    @Transactional
+    public void updateGeneratedSchedule(String blockId, Boolean locked, Boolean completed) {
+        // 1. blockId로 해당 일정 블록 찾기
+        GeneratedSchedule schedule = generatedRepository.findByBlockId(blockId)
+                .orElseThrow(() -> new IllegalArgumentException("해당 일정을 찾을 수 없습니다: " + blockId));
+
+        // 2. 값 업데이트
+        if (locked != null) {
+            schedule.updateLocked(locked);
+        }
+        if (completed != null) {
+            schedule.updateCompleted(completed);
+        }
+
+        generatedRepository.save(schedule);
     }
 }

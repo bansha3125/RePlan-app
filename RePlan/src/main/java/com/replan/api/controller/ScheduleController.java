@@ -10,6 +10,7 @@ import com.replan.api.repository.FixedScheduleRepository;
 import com.replan.api.repository.TaskRepository;
 import com.replan.api.service.ScheduleService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -24,11 +25,12 @@ public class ScheduleController {
     private final FixedScheduleRepository fixedRepository;
 
     @GetMapping("/weekly")
-    public WeeklyScheduleResponse getWeeklySchedule(
+    public ResponseEntity<WeeklyScheduleResponse> getWeeklySchedules(
             @RequestParam Long userId,
             @RequestParam(required = false) String weekStartDate
     ) {
-        return scheduleService.getWeeklySchedules(userId);
+        WeeklyScheduleResponse response = scheduleService.getWeeklySchedules(userId, weekStartDate);
+        return ResponseEntity.ok(response);
     }
 
     @PostMapping("/fixed-schedules")
@@ -60,6 +62,34 @@ public class ScheduleController {
     ) {
         scheduleService.updateTaskCompletion(taskId, completed);
         return "Task 완료 상태 변경 성공!";
+    }
+
+    @PatchMapping("/generated/{blockId}")
+    public ResponseEntity<Void> updateGeneratedSchedule(
+            @PathVariable String blockId,
+            @RequestParam(required = false) Boolean locked,
+            @RequestParam(required = false) Boolean completed
+    ) {
+        scheduleService.updateGeneratedSchedule(blockId, locked, completed);
+        return ResponseEntity.ok().build();
+    }
+
+    @PatchMapping("/tasks/{taskId}")
+    public ResponseEntity<Void> updateTask(
+            @PathVariable Long taskId,
+            @RequestBody TaskRequest request
+    ) {
+        scheduleService.updateTask(taskId, request);
+        return ResponseEntity.ok().build();
+    }
+
+    @DeleteMapping("/tasks/{taskId}")
+    public ResponseEntity<Void> deleteTask(
+            @PathVariable Long taskId,
+            @RequestParam Long userId
+    ) {
+        scheduleService.deleteTask(taskId, userId);
+        return ResponseEntity.ok().build();
     }
 
     @PostMapping("/generate")

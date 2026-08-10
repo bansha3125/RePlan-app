@@ -43,4 +43,12 @@ public class GeneratedSchedule {
     private String reasonCode;
 
     private String reason;
+
+    public void updateLocked(boolean locked) {
+        this.locked = locked;
+    }
+
+    public void updateCompleted(boolean completed) {
+        this.completed = completed;
+    }
 }
