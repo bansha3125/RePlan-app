@@ -43,4 +43,7 @@ public class AiTaskRequest {
 
     @Builder.Default
     private List<String> prerequisiteTaskIds = new ArrayList<>();
+
+    private Boolean useAiDecomposition;
+    private Integer desiredSteps;
 }

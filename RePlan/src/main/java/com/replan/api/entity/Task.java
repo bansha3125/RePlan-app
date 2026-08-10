@@ -39,4 +39,8 @@ public class Task {
 
     @Builder.Default
     private boolean completed = false;
+
+    public void updateCompleted(boolean completed) {
+        this.completed = completed;
+    }
 }

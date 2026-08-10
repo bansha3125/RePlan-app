@@ -2,6 +2,7 @@ package com.replan.api.controller;
 
 import com.replan.api.dto.FixedScheduleRequest;
 import com.replan.api.dto.TaskRequest;
+import com.replan.api.dto.TaskResponse;
 import com.replan.api.dto.WeeklyScheduleResponse;
 import com.replan.api.entity.FixedSchedule;
 import com.replan.api.entity.Task;
@@ -48,8 +49,17 @@ public class ScheduleController {
     }
 
     @GetMapping("/tasks")
-    public List<Task> getTasks(@RequestParam Long userId) {
-        return taskRepository.findByUserId(userId);
+    public List<TaskResponse> getTasks(@RequestParam Long userId) {
+        return scheduleService.getTasks(userId);
+    }
+
+    @PatchMapping("/tasks/{taskId}/complete")
+    public String updateTaskCompletion(
+            @PathVariable Long taskId,
+            @RequestParam boolean completed
+    ) {
+        scheduleService.updateTaskCompletion(taskId, completed);
+        return "Task 완료 상태 변경 성공!";
     }
 
     @PostMapping("/generate")

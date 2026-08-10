@@ -50,8 +50,10 @@ public class ScheduleService {
     private final ObjectMapper objectMapper;
 
     public WeeklyScheduleResponse getWeeklySchedules(Long userId) {
+        // 1. 고정 일정 정렬 (1순위: 시작시간, 2순위: 제목 오름차순 등 필요시 설정)
         List<FixedScheduleDto> fixedDtos = fixedRepository.findByUserId(userId)
                 .stream()
+                .sorted(Comparator.comparing(FixedSchedule::getStartTime))
                 .map(f -> FixedScheduleDto.builder()
                         .fixedScheduleId(f.getFixedScheduleId())
                         .title(f.getTitle())
@@ -62,9 +64,12 @@ public class ScheduleService {
                         .build())
                 .toList();
 
+        // 2. 생성된 일정 정렬 (1순위: 시작시간 오름차순, 2순위: stepOrder 순서 등)
         List<GeneratedScheduleDto> generatedDtos =
                 generatedRepository.findByUserId(userId)
                         .stream()
+                        .sorted(Comparator.comparing(GeneratedSchedule::getStartTime)
+                                .thenComparing(GeneratedSchedule::getStepOrder, Comparator.nullsLast(Comparator.naturalOrder())))
                         .map(g -> GeneratedScheduleDto.builder()
                                 .blockId(g.getBlockId())
                                 .taskId(g.getTaskId())
@@ -104,7 +109,7 @@ public class ScheduleService {
                 .estimatedMinutes(request.getEstimatedMinutes())
                 .useAiDecomposition(request.isUseAiDecomposition())
                 .desiredSteps(request.getDesiredSteps())
-                .priority(request.getPriority() != null ? request.getPriority() : 2) // [수정] 전달받은 중요도 저장 (없으면 기본값 2)
+                .priority(request.getPriority() != null ? request.getPriority() : 2)
                 .build());
     }
 
@@ -200,7 +205,7 @@ public class ScheduleService {
         return taskRepository.findByUserId(userId)
                 .stream()
                 .map(task -> {
-                    // [추가] 프론트/DB의 3단계(상중하 또는 1,2,3)를 AI가 요구하는 1~5 단계로 매핑
+                    // 프론트/DB의 3단계(상중하 또는 1,2,3)를 AI가 요구하는 1~5 단계로 매핑
                     int mappedPriority = convertPriorityToAiScale(task.getPriority());
 
                     return AiTaskRequest.builder()
@@ -209,12 +214,11 @@ public class ScheduleService {
                             .estimatedMinutes(task.getEstimatedMinutes())
                             .deadline(task.getDeadline().toString())
 
-                        /*
-                         * AI 명세상 필수값이다.
-                         * 현재 TaskRequest/Task Entity에 연결된 필드가 없어 임시 기본값 사용.
-                         */
-                            .priority(mappedPriority) // [수정] 변환된 1~5 값 전달
-
+                            /*
+                             * AI 명세상 필수값이다.
+                             * 현재 TaskRequest/Task Entity에 연결된 필드가 없어 임시 기본값 사용.
+                             */
+                            .priority(mappedPriority)
                             .difficulty(task.getDifficulty())
                             .focusRequired(task.getFocusRequired())
                             .postponeCount(task.getPostponeCount())
@@ -239,7 +243,7 @@ public class ScheduleService {
             case 1: // 하
                 return 1;
             default:
-                return frontPriority; // 이미 1~5 범위라면 그대로 반환
+                return frontPriority;
         }
     }
 
@@ -389,20 +393,32 @@ public class ScheduleService {
         }
 
         List<GeneratedSchedule> schedules = aiResponse.stream()
-                .map(block -> GeneratedSchedule.builder()
-                        .userId(userId)
-                        .taskId(parseLongTaskId(block.getTaskId()))
-                        .title(block.getTitle())
-                        .startTime(parseDateTime(block.getStartTime(), "startTime"))
-                        .endTime(parseDateTime(block.getEndTime(), "endTime"))
-                        .blockId(block.getBlockId())
-                        .stepOrder(block.getStepOrder())
-                        .source(block.getSource())
-                        .locked(Boolean.TRUE.equals(block.getLocked()))
-                        .completed(Boolean.TRUE.equals(block.getCompleted()))
-                        .reasonCode(block.getReasonCode())
-                        .reason(block.getReason())
-                        .build())
+                .map(block -> {
+                    Long parsedTaskId = parseLongTaskId(block.getTaskId());
+
+                    String finalTitle = block.getTitle();
+                    if (parsedTaskId != null) {
+                        Task task = taskRepository.findById(parsedTaskId).orElse(null);
+                        if (task != null && task.getTitle() != null) {
+                            finalTitle = "[" + task.getTitle() + "] " + block.getTitle();
+                        }
+                    }
+
+                    return GeneratedSchedule.builder()
+                            .userId(userId)
+                            .taskId(parsedTaskId)
+                            .title(finalTitle)
+                            .startTime(parseDateTime(block.getStartTime(), "startTime"))
+                            .endTime(parseDateTime(block.getEndTime(), "endTime"))
+                            .blockId(block.getBlockId())
+                            .stepOrder(block.getStepOrder())
+                            .source(block.getSource())
+                            .locked(Boolean.TRUE.equals(block.getLocked()))
+                            .completed(Boolean.TRUE.equals(block.getCompleted()))
+                            .reasonCode(block.getReasonCode())
+                            .reason(block.getReason())
+                            .build();
+                })
                 .toList();
 
         generatedRepository.saveAll(schedules);
@@ -485,5 +501,28 @@ public class ScheduleService {
         } catch (JsonProcessingException exception) {
             return String.valueOf(value);
         }
+    }
+
+    public List<TaskResponse> getTasks(Long userId) {
+        return taskRepository.findByUserId(userId)
+                .stream()
+                .sorted(Comparator.comparing(Task::isCompleted)
+                        .thenComparing(Task::getDeadline, Comparator.nullsLast(Comparator.naturalOrder())))
+                .map(task -> TaskResponse.builder()
+                        .taskId(task.getTaskId())
+                        .title(task.getTitle())
+                        .deadline(task.getDeadline() != null ? task.getDeadline().toString() : null)
+                        .estimatedMinutes(task.getEstimatedMinutes())
+                        .completed(task.isCompleted())
+                        .priority(task.getPriority())
+                        .build())
+                .toList();
+    }
+
+    @Transactional
+    public void updateTaskCompletion(Long taskId, boolean completed) {
+        Task task = taskRepository.findById(taskId)
+                .orElseThrow(() -> new IllegalArgumentException("해당 Task가 없습니다. id=" + taskId));
+        task.updateCompleted(completed);
     }
 }
