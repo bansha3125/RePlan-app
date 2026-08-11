@@ -39,4 +39,18 @@ public class Task {
 
     @Builder.Default
     private boolean completed = false;
+
+    public void updateCompleted(boolean completed) {
+        this.completed = completed;
+    }
+
+    public void update(String title, LocalDateTime deadline, int estimatedMinutes,
+                       boolean useAiDecomposition, int desiredSteps, int priority) {
+        this.title = title;
+        this.deadline = deadline;
+        this.estimatedMinutes = estimatedMinutes;
+        this.useAiDecomposition = useAiDecomposition;
+        this.desiredSteps = desiredSteps;
+        this.priority = priority;
+    }
 }

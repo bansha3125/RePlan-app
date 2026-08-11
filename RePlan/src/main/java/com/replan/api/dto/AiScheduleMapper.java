@@ -1,6 +1,6 @@
 package com.replan.api.dto;
 
-/**
+/*
  * AI 응답 DTO를 프론트 응답 DTO로 변환한다.
  */
 public final class AiScheduleMapper {
