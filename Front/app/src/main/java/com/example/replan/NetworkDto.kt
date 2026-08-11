@@ -35,7 +35,7 @@ data class GeneratedScheduleDto(
 )
 
 // =========================================================================
-// 2. 등록 및 상태 변경 요청 DTO (userId 필드 제거)
+// 2. 등록 및 상태 변경 요청 DTO
 // =========================================================================
 
 // 일반 할 일 추가 (POST /schedules/tasks)
@@ -81,7 +81,7 @@ data class UpdateScheduleStatusApiRequest(
     @SerializedName("endTime") val endTime: String? = null
 )
 
-// 할 일 조회 응답 DTO
+// ★ [수정] 할 일 조회 응답 DTO (deadlineType 및 linkedScheduleId 연동 추가)
 data class TaskResponse(
     @SerializedName("taskId") val taskId: Long? = null,
     @SerializedName("title") val title: String = "",
@@ -94,8 +94,19 @@ data class TaskResponse(
     @SerializedName("focusRequired") val focusRequired: Int = 3,
     @SerializedName("postponeCount") val postponeCount: Int = 0,
     @SerializedName("completedMinutes") val completedMinutes: Int = 0,
-    @SerializedName("completed") val completed: Boolean = false
+    @SerializedName("completed") val completed: Boolean = false,
+    @SerializedName("deadlineType") val deadlineType: String? = "DATE",
+    @SerializedName("linkedScheduleId") val linkedScheduleId: Long? = null
 )
+
+// Task 완료 상태 변경 요청 Body DTO
+data class UpdateTaskCompletionApiRequest(
+    @SerializedName("completed") val completed: Boolean
+)
+
+// =========================================================================
+// 3. UI 및 애니메이션 리플레이용 내부 데이터 모델
+// =========================================================================
 
 data class ScheduleCardTag(
     val taskId: Long? = null,

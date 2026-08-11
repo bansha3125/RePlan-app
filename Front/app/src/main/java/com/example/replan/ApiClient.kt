@@ -92,12 +92,13 @@ interface ScheduleApiService {
     ): Response<ResponseBody>
 
     /**
-     * 할 일 완료 상태 업데이트 API (PATCH /schedules/tasks/{taskId}?completed=true)
+     * Task 완료 상태 변경 API
+     * (PATCH /schedules/tasks/{taskId}/complete) -> Body: {"completed": true}
      */
-    @PATCH("schedules/tasks/{taskId}")
+    @PATCH("schedules/tasks/{taskId}/complete")
     suspend fun updateTaskStatus(
         @Path("taskId") taskId: Long,
-        @Query("completed") completed: Boolean
+        @Body request: UpdateTaskCompletionApiRequest
     ): Response<ResponseBody>
 
     /**
@@ -116,7 +117,6 @@ object ApiClient {
         appContext = context.applicationContext
     }
 
-    // 모든 API 요청 Header에 X-Device-UUID 및 Content-Type 자동 삽입
     private val headerInterceptor = Interceptor { chain ->
         val originalRequest = chain.request()
         val uuid = if (::appContext.isInitialized) {
