@@ -44,6 +44,14 @@ public class GeneratedSchedule {
 
     private String reason;
 
+    public void updateStartTime(LocalDateTime startTime) {
+        this.startTime = startTime;
+    }
+
+    public void updateEndTime(LocalDateTime endTime) {
+        this.endTime = endTime;
+    }
+
     public void updateLocked(boolean locked) {
         this.locked = locked;
     }

@@ -101,6 +101,22 @@ public class ScheduleService {
                 .build();
     }
 
+    public List<TaskResponse> getTasks(Long userId) {
+        return taskRepository.findByUserId(userId)
+                .stream()
+                .sorted(Comparator.comparing(Task::isCompleted)
+                        .thenComparing(Task::getDeadline, Comparator.nullsLast(Comparator.naturalOrder())))
+                .map(task -> TaskResponse.builder()
+                        .taskId(task.getTaskId())
+                        .title(task.getTitle())
+                        .deadline(task.getDeadline() != null ? task.getDeadline().toString() : null)
+                        .estimatedMinutes(task.getEstimatedMinutes())
+                        .completed(task.isCompleted())
+                        .priority(task.getPriority())
+                        .build())
+                .toList();
+    }
+
     public void saveFixedSchedule(FixedScheduleRequest request) {
         fixedRepository.save(FixedSchedule.builder()
                 .userId(request.getUserId())
@@ -121,6 +137,67 @@ public class ScheduleService {
                 .desiredSteps(request.getDesiredSteps())
                 .priority(request.getPriority() != null ? request.getPriority() : 2)
                 .build());
+    }
+
+    @Transactional
+    public void updateTask(Long taskId, TaskRequest request) {
+        Task task = taskRepository.findById(taskId)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 할 일입니다: " + taskId));
+
+        task.update(
+                request.getTitle(),
+                LocalDateTime.parse(request.getDeadline()),
+                request.getEstimatedMinutes(),
+                request.isUseAiDecomposition(),
+                request.getDesiredSteps(),
+                request.getPriority() != null ? request.getPriority() : 2
+        );
+
+        taskRepository.save(task);
+    }
+
+    @Transactional
+    public void updateTaskCompletion(Long taskId, boolean completed) {
+        Task task = taskRepository.findById(taskId)
+                .orElseThrow(() -> new IllegalArgumentException("해당 Task가 없습니다. id=" + taskId));
+        task.updateCompleted(completed);
+    }
+
+    @Transactional
+    public void updateGeneratedSchedule(String blockId, Boolean locked, Boolean completed, String startTime, String endTime) {
+        // 1. blockId로 해당 일정 블록 찾기
+        GeneratedSchedule schedule = generatedRepository.findByBlockId(blockId)
+                .orElseThrow(() -> new IllegalArgumentException("해당 일정을 찾을 수 없습니다: " + blockId));
+
+        log.info("수정 전 시간: {}, {}", schedule.getStartTime(), schedule.getEndTime());
+        log.info("요청받은 시간: {}, {}", startTime, endTime);
+
+        // 2. 값 업데이트
+        if (locked != null) {
+            schedule.updateLocked(locked);
+        }
+        if (completed != null) {
+            schedule.updateCompleted(completed);
+        }
+        if (startTime != null && !startTime.isBlank()) {
+            schedule.updateStartTime(LocalDateTime.parse(startTime));
+        }
+        if (endTime != null && !endTime.isBlank()) {
+            schedule.updateEndTime(LocalDateTime.parse(endTime));
+        }
+
+        // 3. 변경 사항을 즉시 DB에 플러시(Flush)하여 반영
+        generatedRepository.saveAndFlush(schedule);
+        log.info("수정 완료 후 DB 저장 및 플러시 완료");
+    }
+
+    @Transactional
+    public void deleteTask(Long taskId, Long userId) {
+        // 1. 관련 AI 생성 일정 먼저 삭제 (고아 데이터 방지)
+        generatedRepository.deleteByTaskId(taskId);
+
+        // 2. 본체 Task 삭제
+        taskRepository.deleteById(taskId);
     }
 
     @Transactional
@@ -236,6 +313,8 @@ public class ScheduleService {
                             .remainingMinutes(task.getEstimatedMinutes())
                             .completed(task.isCompleted())
                             .prerequisiteTaskIds(new ArrayList<>())
+                            .useAiDecomposition(task.isUseAiDecomposition())
+                            .desiredSteps(task.getDesiredSteps())
                             .build();
                 })
                 .toList();
@@ -511,71 +590,5 @@ public class ScheduleService {
         } catch (JsonProcessingException exception) {
             return String.valueOf(value);
         }
-    }
-
-    public List<TaskResponse> getTasks(Long userId) {
-        return taskRepository.findByUserId(userId)
-                .stream()
-                .sorted(Comparator.comparing(Task::isCompleted)
-                        .thenComparing(Task::getDeadline, Comparator.nullsLast(Comparator.naturalOrder())))
-                .map(task -> TaskResponse.builder()
-                        .taskId(task.getTaskId())
-                        .title(task.getTitle())
-                        .deadline(task.getDeadline() != null ? task.getDeadline().toString() : null)
-                        .estimatedMinutes(task.getEstimatedMinutes())
-                        .completed(task.isCompleted())
-                        .priority(task.getPriority())
-                        .build())
-                .toList();
-    }
-
-    @Transactional
-    public void updateTaskCompletion(Long taskId, boolean completed) {
-        Task task = taskRepository.findById(taskId)
-                .orElseThrow(() -> new IllegalArgumentException("해당 Task가 없습니다. id=" + taskId));
-        task.updateCompleted(completed);
-    }
-
-    @Transactional
-    public void updateTask(Long taskId, TaskRequest request) {
-        Task task = taskRepository.findById(taskId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 할 일입니다: " + taskId));
-
-        task.update(
-                request.getTitle(),
-                LocalDateTime.parse(request.getDeadline()),
-                request.getEstimatedMinutes(),
-                request.isUseAiDecomposition(),
-                request.getDesiredSteps(),
-                request.getPriority() != null ? request.getPriority() : 2
-        );
-
-        taskRepository.save(task);
-    }
-
-    @Transactional
-    public void deleteTask(Long taskId, Long userId) {
-        // 1. 관련 AI 생성 일정 먼저 삭제 (고아 데이터 방지)
-        generatedRepository.deleteByTaskId(taskId);
-
-        // 2. 본체 Task 삭제
-        taskRepository.deleteById(taskId);
-    }
-
-    @Transactional
-    public void updateGeneratedSchedule(String blockId, Boolean locked, Boolean completed) {
-        // 1. blockId로 해당 일정 블록 찾기
-        GeneratedSchedule schedule = generatedRepository.findByBlockId(blockId)
-                .orElseThrow(() -> new IllegalArgumentException("해당 일정을 찾을 수 없습니다: " + blockId));
-
-        // 2. 값 업데이트
-        if (locked != null) {
-            schedule.updateLocked(locked);
-        }
-        if (completed != null) {
-            schedule.updateCompleted(completed);
-        }
-
-        generatedRepository.save(schedule);
     }
 }

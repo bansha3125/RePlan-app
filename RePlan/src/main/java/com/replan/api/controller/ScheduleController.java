@@ -1,11 +1,10 @@
 package com.replan.api.controller;
 
-import com.replan.api.dto.FixedScheduleRequest;
-import com.replan.api.dto.TaskRequest;
-import com.replan.api.dto.TaskResponse;
-import com.replan.api.dto.WeeklyScheduleResponse;
+import com.replan.api.dto.*;
 import com.replan.api.entity.FixedSchedule;
 import com.replan.api.entity.Task;
+import com.replan.api.entity.User;
+import com.replan.api.resolver.CurrentDevice;
 import com.replan.api.repository.FixedScheduleRepository;
 import com.replan.api.repository.TaskRepository;
 import com.replan.api.service.ScheduleService;
@@ -14,6 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/schedules")
@@ -26,33 +26,41 @@ public class ScheduleController {
 
     @GetMapping("/weekly")
     public ResponseEntity<WeeklyScheduleResponse> getWeeklySchedules(
-            @RequestParam Long userId,
+            @CurrentDevice User user,
             @RequestParam(required = false) String weekStartDate
     ) {
-        WeeklyScheduleResponse response = scheduleService.getWeeklySchedules(userId, weekStartDate);
+        WeeklyScheduleResponse response = scheduleService.getWeeklySchedules(user.getId(), weekStartDate);
         return ResponseEntity.ok(response);
     }
 
     @PostMapping("/fixed-schedules")
-    public String addFixedSchedule(@RequestBody FixedScheduleRequest request) {
+    public String addFixedSchedule(
+            @CurrentDevice User user,
+            @RequestBody FixedScheduleRequest request
+    ) {
+        request.setUserId(user.getId());
         scheduleService.saveFixedSchedule(request);
         return "고정 일정 저장 성공!";
     }
 
     @GetMapping("/fixed-schedules")
-    public List<FixedSchedule> getFixedSchedules(@RequestParam Long userId) {
-        return fixedRepository.findByUserId(userId);
+    public List<FixedSchedule> getFixedSchedules(@CurrentDevice User user) {
+        return fixedRepository.findByUserId(user.getId());
     }
 
     @PostMapping("/tasks")
-    public String addTask(@RequestBody TaskRequest request) {
+    public String addTask(
+            @CurrentDevice User user,
+            @RequestBody TaskRequest request
+    ) {
+        request.setUserId(user.getId());
         scheduleService.saveTask(request);
         return "할 일 저장 성공!";
     }
 
     @GetMapping("/tasks")
-    public List<TaskResponse> getTasks(@RequestParam Long userId) {
-        return scheduleService.getTasks(userId);
+    public List<TaskResponse> getTasks(@CurrentDevice User user) {
+        return scheduleService.getTasks(user.getId());
     }
 
     @PatchMapping("/tasks/{taskId}/complete")
@@ -64,14 +72,19 @@ public class ScheduleController {
         return "Task 완료 상태 변경 성공!";
     }
 
-    @PatchMapping("/generated/{blockId}")
-    public ResponseEntity<Void> updateGeneratedSchedule(
+    @PatchMapping("/blocks/{blockId}")
+    public ResponseEntity<Map<String, String>> updateGeneratedSchedule(
             @PathVariable String blockId,
-            @RequestParam(required = false) Boolean locked,
-            @RequestParam(required = false) Boolean completed
+            @RequestBody java.util.Map<String, Object> requestBody
     ) {
-        scheduleService.updateGeneratedSchedule(blockId, locked, completed);
-        return ResponseEntity.ok().build();
+        Boolean locked = requestBody.get("locked") != null ? (Boolean) requestBody.get("locked") : null;
+        Boolean completed = requestBody.get("completed") != null ? (Boolean) requestBody.get("completed") : null;
+        String startTime = requestBody.get("startTime") != null ? requestBody.get("startTime").toString() : null;
+        String endTime = requestBody.get("endTime") != null ? requestBody.get("endTime").toString() : null;
+
+        scheduleService.updateGeneratedSchedule(blockId, locked, completed, startTime, endTime);
+
+        return ResponseEntity.ok(Map.of("message", "일정 위치 및 상태가 성공적으로 변경되었습니다."));
     }
 
     @PatchMapping("/tasks/{taskId}")
@@ -86,31 +99,30 @@ public class ScheduleController {
     @DeleteMapping("/tasks/{taskId}")
     public ResponseEntity<Void> deleteTask(
             @PathVariable Long taskId,
-            @RequestParam Long userId
+            @CurrentDevice User user
     ) {
-        scheduleService.deleteTask(taskId, userId);
+        scheduleService.deleteTask(taskId, user.getId());
         return ResponseEntity.ok().build();
     }
 
     @PostMapping("/generate")
-    public String generateAiSchedule(@RequestBody java.util.Map<String, Object> requestBody) {
-        Object userIdObj = requestBody.get("userId");
-        if (userIdObj == null) {
-            throw new IllegalArgumentException("요청 본문에 userId가 포함되어 있지 않습니다.");
-        }
-        Long userId = Long.valueOf(userIdObj.toString());
-
+    public String generateAiSchedule(
+            @CurrentDevice User user,
+            @RequestBody java.util.Map<String, Object> requestBody
+    ) {
         String weekStartDate = requestBody.get("weekStartDate") != null
                 ? requestBody.get("weekStartDate").toString()
                 : null;
 
-        scheduleService.generateAiSchedule(userId, weekStartDate);
+        scheduleService.generateAiSchedule(user.getId(), weekStartDate);
         return "AI 스케줄 생성 및 DB 저장 요청 완료!";
     }
 
     @PostMapping("/replan")
-    public String replanAiSchedule(@RequestBody java.util.Map<String, Object> requestBody) {
-        Long userId = Long.valueOf(requestBody.get("userId").toString());
+    public String replanAiSchedule(
+            @CurrentDevice User user,
+            @RequestBody java.util.Map<String, Object> requestBody
+    ) {
         String replanFromTime = (String) requestBody.get("replanFromTime");
 
         @SuppressWarnings("unchecked")
@@ -121,7 +133,7 @@ public class ScheduleController {
         List<Long> postponedTaskIds = requestBody.get("postponedTaskIds") != null ?
                 ((List<?>) requestBody.get("postponedTaskIds")).stream().map(obj -> Long.valueOf(obj.toString())).toList() : List.of();
 
-        scheduleService.replanAiSchedule(userId, replanFromTime, completedTaskIds, postponedTaskIds);
+        scheduleService.replanAiSchedule(user.getId(), replanFromTime, completedTaskIds, postponedTaskIds);
         return "AI 일정 재배치 및 DB 반영 요청 완료!";
     }
 }

@@ -2,6 +2,7 @@ package com.replan.api.dto;
 
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 /*
  * 프론트엔드에서 일반 할 일을 생성할 때 사용하는 요청 DTO.
@@ -11,6 +12,7 @@ import lombok.NoArgsConstructor;
  * AiTaskRequest로 대체하지 않는다.
  */
 @Getter
+@Setter
 @NoArgsConstructor
 public class TaskRequest {
     private Long userId;
