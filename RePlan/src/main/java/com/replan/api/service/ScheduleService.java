@@ -21,6 +21,8 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.temporal.TemporalAdjusters;
 import java.util.*;
+import java.util.stream.Collectors;
+
 import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
@@ -48,6 +50,7 @@ public class ScheduleService {
     private final TaskRepository taskRepository;
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
+    private final jakarta.persistence.EntityManager entityManager;
 
     public WeeklyScheduleResponse getWeeklySchedules(Long userId, String weekStartDateParam) {
         LocalDate weekStartDate = (weekStartDateParam != null && !weekStartDateParam.isBlank())
@@ -133,7 +136,7 @@ public class ScheduleService {
                 .title(request.getTitle())
                 .deadline(LocalDateTime.parse(request.getDeadline()))
                 .estimatedMinutes(request.getEstimatedMinutes())
-                .useAiDecomposition(request.isUseAiDecomposition())
+                .useAiDecomposition(Boolean.TRUE.equals(request.getUseAiDecomposition()))
                 .desiredSteps(request.getDesiredSteps())
                 .priority(request.getPriority() != null ? request.getPriority() : 2)
                 .build());
@@ -148,7 +151,7 @@ public class ScheduleService {
                 request.getTitle(),
                 LocalDateTime.parse(request.getDeadline()),
                 request.getEstimatedMinutes(),
-                request.isUseAiDecomposition(),
+                Boolean.TRUE.equals(request.getUseAiDecomposition()),
                 request.getDesiredSteps(),
                 request.getPriority() != null ? request.getPriority() : 2
         );
@@ -165,35 +168,46 @@ public class ScheduleService {
 
     @Transactional
     public void updateGeneratedSchedule(String blockId, Boolean locked, Boolean completed, String startTime, String endTime) {
-        // 1. blockId로 해당 일정 블록 찾기
         GeneratedSchedule schedule = generatedRepository.findByBlockId(blockId)
                 .orElseThrow(() -> new IllegalArgumentException("해당 일정을 찾을 수 없습니다: " + blockId));
 
-        log.info("수정 전 시간: {}, {}", schedule.getStartTime(), schedule.getEndTime());
-        log.info("요청받은 시간: {}, {}", startTime, endTime);
+        if (locked != null) schedule.updateLocked(locked);
 
-        // 2. 값 업데이트
-        if (locked != null) {
-            schedule.updateLocked(locked);
-        }
+        // 1. 일정 완료 상태 업데이트
         if (completed != null) {
             schedule.updateCompleted(completed);
-        }
-        if (startTime != null && !startTime.isBlank()) {
-            schedule.updateStartTime(LocalDateTime.parse(startTime));
-        }
-        if (endTime != null && !endTime.isBlank()) {
-            schedule.updateEndTime(LocalDateTime.parse(endTime));
+
+            // 2. 일정이 완료(true)되었다면 같은 taskId를 가진 다른 일정이 남았는지 확인 후 Task 완료 처리
+            if (completed && schedule.getTaskId() != null) {
+                checkAndCompleteTask(schedule.getTaskId());
+            }
+            // 3. 반대로 일정이 미완료(false)로 바뀌었다면, 부모 Task도 무조건 미완료(false)로 되돌린다.
+            else if (!completed && schedule.getTaskId() != null) {
+                Task task = taskRepository.findById(schedule.getTaskId()).orElse(null);
+                if (task != null && task.isCompleted()) {
+                    task.updateCompleted(false);
+                    taskRepository.save(task);
+                }
+            }
         }
 
-        // 3. 변경 사항을 즉시 DB에 플러시(Flush)하여 반영
+        if (startTime != null && !startTime.isBlank()) schedule.updateStartTime(LocalDateTime.parse(startTime));
+        if (endTime != null && !endTime.isBlank()) schedule.updateEndTime(LocalDateTime.parse(endTime));
+
         generatedRepository.saveAndFlush(schedule);
-        log.info("수정 완료 후 DB 저장 및 플러시 완료");
+    }
+
+    private void checkAndCompleteTask(Long taskId) {
+        if (!generatedRepository.existsByTaskIdAndCompletedFalse(taskId)) {
+            Task task = taskRepository.findById(taskId).orElseThrow();
+            task.updateCompleted(true);
+            taskRepository.save(task);
+        }
     }
 
     @Transactional
     public void deleteTask(Long taskId, Long userId) {
-        // 1. 관련 AI 생성 일정 먼저 삭제 (고아 데이터 방지)
+        // 1. 관련 AI 생성 일정 먼저 삭제
         generatedRepository.deleteByTaskId(taskId);
 
         // 2. 본체 Task 삭제
@@ -471,46 +485,92 @@ public class ScheduleService {
             List<AiScheduleBlockResponse> aiResponse,
             Long userId
     ) {
+        // 1. 기존 일정 중 '완료된(completed = true)' 것들의 blockId만 가볍게 추출해 둔다.
+        Set<String> completedBlockIds = generatedRepository.findByUserId(userId)
+                .stream()
+                .filter(schedule -> Boolean.TRUE.equals(schedule.getCompleted()))
+                .map(GeneratedSchedule::getBlockId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+
+        // 만약 완료된 일정이 있다면, 그 일정들의 엔티티도 따로 조회해서 살려둘 준비를 한다.
+        List<GeneratedSchedule> completedSchedulesBackup = generatedRepository.findByUserId(userId)
+                .stream()
+                .filter(schedule -> Boolean.TRUE.equals(schedule.getCompleted()))
+                .toList();
+
         /*
          * 결과가 비어 있어도 기존 일정을 먼저 지워야 한다.
          * 그렇지 않으면 AI가 모든 작업을 미배치한 경우 옛 일정이 남는다.
          */
         generatedRepository.deleteByUserId(userId);
 
-        if (aiResponse == null || aiResponse.isEmpty()) {
-            return;
+        List<GeneratedSchedule> newSchedules = new ArrayList<>();
+        if (aiResponse != null && !aiResponse.isEmpty()) {
+            newSchedules = aiResponse.stream()
+                    .map(block -> {
+                        Long parsedTaskId = parseLongTaskId(block.getTaskId());
+
+                        String finalTitle = block.getTitle();
+                        if (parsedTaskId != null) {
+                            Task task = taskRepository.findById(parsedTaskId).orElse(null);
+                            if (task != null && task.getTitle() != null) {
+                                finalTitle = "[" + task.getTitle() + "] " + block.getTitle();
+                            }
+                        }
+
+                        // 만약 이 블록이 원래 완료되었던 블록이라면 completed를 true로 강제 유지
+                        boolean isCompleted = Boolean.TRUE.equals(block.getCompleted())
+                                || completedBlockIds.contains(block.getBlockId());
+
+                        return GeneratedSchedule.builder()
+                                .userId(userId)
+                                .taskId(parsedTaskId)
+                                .title(finalTitle)
+                                .startTime(parseDateTime(block.getStartTime(), "startTime"))
+                                .endTime(parseDateTime(block.getEndTime(), "endTime"))
+                                .blockId(block.getBlockId())
+                                .stepOrder(block.getStepOrder())
+                                .source(block.getSource())
+                                .locked(Boolean.TRUE.equals(block.getLocked()))
+                                .completed(isCompleted)
+                                .reasonCode(block.getReasonCode())
+                                .reason(block.getReason())
+                                .build();
+                    })
+                    .toList();
         }
 
-        List<GeneratedSchedule> schedules = aiResponse.stream()
-                .map(block -> {
-                    Long parsedTaskId = parseLongTaskId(block.getTaskId());
+        List<GeneratedSchedule> finalSchedulesToSave = new ArrayList<>(newSchedules);
 
-                    String finalTitle = block.getTitle();
-                    if (parsedTaskId != null) {
-                        Task task = taskRepository.findById(parsedTaskId).orElse(null);
-                        if (task != null && task.getTitle() != null) {
-                            finalTitle = "[" + task.getTitle() + "] " + block.getTitle();
-                        }
-                    }
+        Set<String> newBlockIds = newSchedules.stream()
+                .map(GeneratedSchedule::getBlockId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
 
-                    return GeneratedSchedule.builder()
-                            .userId(userId)
-                            .taskId(parsedTaskId)
-                            .title(finalTitle)
-                            .startTime(parseDateTime(block.getStartTime(), "startTime"))
-                            .endTime(parseDateTime(block.getEndTime(), "endTime"))
-                            .blockId(block.getBlockId())
-                            .stepOrder(block.getStepOrder())
-                            .source(block.getSource())
-                            .locked(Boolean.TRUE.equals(block.getLocked()))
-                            .completed(Boolean.TRUE.equals(block.getCompleted()))
-                            .reasonCode(block.getReasonCode())
-                            .reason(block.getReason())
-                            .build();
-                })
-                .toList();
+        // AI 응답 목록에 포함되지 않은 기존 완료 일정들은 새로 빌드해서 안전하게 추가 (영속성 충돌 방지)
+        for (GeneratedSchedule oldSchedule : completedSchedulesBackup) {
+            if (!newBlockIds.contains(oldSchedule.getBlockId())) {
+                finalSchedulesToSave.add(
+                        GeneratedSchedule.builder()
+                                .userId(oldSchedule.getUserId())
+                                .taskId(oldSchedule.getTaskId())
+                                .title(oldSchedule.getTitle())
+                                .startTime(oldSchedule.getStartTime())
+                                .endTime(oldSchedule.getEndTime())
+                                .blockId(oldSchedule.getBlockId())
+                                .stepOrder(oldSchedule.getStepOrder())
+                                .source(oldSchedule.getSource())
+                                .locked(oldSchedule.getLocked())
+                                .completed(true)
+                                .reasonCode(oldSchedule.getReasonCode())
+                                .reason(oldSchedule.getReason())
+                                .build()
+                );
+            }
+        }
 
-        generatedRepository.saveAll(schedules);
+        generatedRepository.saveAll(finalSchedulesToSave);
     }
 
     private Long parseLongTaskId(String taskId) {

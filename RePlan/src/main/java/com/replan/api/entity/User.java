@@ -16,8 +16,8 @@ public class User {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id; // 내부 관리용 PK
+    private Long id;
 
     @Column(nullable = false, unique = true, length = 36)
-    private String deviceUuid; // 클라이언트의 X-Device-UUID 값
+    private String deviceUuid;
 }

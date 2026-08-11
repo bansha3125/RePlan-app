@@ -11,7 +11,9 @@ public interface GeneratedScheduleRepository extends JpaRepository<GeneratedSche
     List<GeneratedSchedule> findByUserId(Long userId);
     void deleteByUserId(Long userId);
     void deleteByTaskId(Long taskId);
-    Optional<GeneratedSchedule> findByBlockId(String blockId);
 
+    Optional<GeneratedSchedule> findByBlockId(String blockId);
     List<GeneratedSchedule> findByUserIdAndStartTimeBetween(Long userId, LocalDateTime start, LocalDateTime end);
+
+    boolean existsByTaskIdAndCompletedFalse(Long taskId);
 }

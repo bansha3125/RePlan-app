@@ -63,30 +63,6 @@ public class ScheduleController {
         return scheduleService.getTasks(user.getId());
     }
 
-    @PatchMapping("/tasks/{taskId}/complete")
-    public String updateTaskCompletion(
-            @PathVariable Long taskId,
-            @RequestParam boolean completed
-    ) {
-        scheduleService.updateTaskCompletion(taskId, completed);
-        return "Task 완료 상태 변경 성공!";
-    }
-
-    @PatchMapping("/blocks/{blockId}")
-    public ResponseEntity<Map<String, String>> updateGeneratedSchedule(
-            @PathVariable String blockId,
-            @RequestBody java.util.Map<String, Object> requestBody
-    ) {
-        Boolean locked = requestBody.get("locked") != null ? (Boolean) requestBody.get("locked") : null;
-        Boolean completed = requestBody.get("completed") != null ? (Boolean) requestBody.get("completed") : null;
-        String startTime = requestBody.get("startTime") != null ? requestBody.get("startTime").toString() : null;
-        String endTime = requestBody.get("endTime") != null ? requestBody.get("endTime").toString() : null;
-
-        scheduleService.updateGeneratedSchedule(blockId, locked, completed, startTime, endTime);
-
-        return ResponseEntity.ok(Map.of("message", "일정 위치 및 상태가 성공적으로 변경되었습니다."));
-    }
-
     @PatchMapping("/tasks/{taskId}")
     public ResponseEntity<Void> updateTask(
             @PathVariable Long taskId,
@@ -103,6 +79,21 @@ public class ScheduleController {
     ) {
         scheduleService.deleteTask(taskId, user.getId());
         return ResponseEntity.ok().build();
+    }
+
+    @PatchMapping("/blocks/{blockId}")
+    public ResponseEntity<Map<String, String>> updateGeneratedSchedule(
+            @PathVariable String blockId,
+            @RequestBody java.util.Map<String, Object> requestBody
+    ) {
+        Boolean locked = requestBody.get("locked") != null ? (Boolean) requestBody.get("locked") : null;
+        Boolean completed = requestBody.get("completed") != null ? (Boolean) requestBody.get("completed") : null;
+        String startTime = requestBody.get("startTime") != null ? requestBody.get("startTime").toString() : null;
+        String endTime = requestBody.get("endTime") != null ? requestBody.get("endTime").toString() : null;
+
+        scheduleService.updateGeneratedSchedule(blockId, locked, completed, startTime, endTime);
+
+        return ResponseEntity.ok(Map.of("message", "일정 위치 및 상태가 성공적으로 변경되었습니다."));
     }
 
     @PostMapping("/generate")

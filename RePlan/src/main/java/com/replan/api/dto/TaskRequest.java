@@ -19,7 +19,7 @@ public class TaskRequest {
     private String title;
     private String deadline;
     private int estimatedMinutes;
-    private boolean useAiDecomposition;
+    private Boolean useAiDecomposition;
     private int desiredSteps;
 
     private String deadlineType;
