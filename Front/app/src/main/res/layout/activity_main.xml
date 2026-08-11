@@ -6,201 +6,208 @@
     android:layout_height="match_parent"
     android:background="#F8F9FA">
 
-    <!-- 1. 주간 시간표 영역 -->
-    <androidx.core.widget.NestedScrollView
-        android:id="@+id/plannerScrollView"
+    <!-- 메인 전체 레이아웃 (상단 고정 영역 + 하단 스크롤 영역) -->
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:fillViewport="true"
-        android:paddingBottom="130dp">
+        android:orientation="vertical">
 
+        <!-- 1. [상단 고정 영역 1] 타이틀 & 주간 이동 & 버튼들 -->
+        <LinearLayout
+            android:id="@+id/headerLayout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingTop="16dp"
+            android:paddingHorizontal="16dp"
+            android:background="#F8F9FA">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="RePlan"
+                android:textStyle="bold"
+                android:textColor="#283593"
+                android:textSize="18sp"
+                android:layout_gravity="center"/>
+
+            <!-- 주간 이동 버튼 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center"
+                android:layout_marginTop="4dp">
+
+                <TextView
+                    android:id="@+id/btnPrevWeek"
+                    android:layout_width="32dp"
+                    android:layout_height="32dp"
+                    android:text="‹"
+                    android:textSize="22sp"
+                    android:textColor="#555555"
+                    android:gravity="center"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:clickable="true"
+                    android:focusable="true"/>
+
+                <TextView
+                    android:id="@+id/tvWeekRange"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="8월 10일 - 8월 16일"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:textColor="#111111"
+                    android:layout_marginHorizontal="12dp"/>
+
+                <TextView
+                    android:id="@+id/btnNextWeek"
+                    android:layout_width="32dp"
+                    android:layout_height="32dp"
+                    android:text="›"
+                    android:textSize="22sp"
+                    android:textColor="#555555"
+                    android:gravity="center"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:clickable="true"
+                    android:focusable="true"/>
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_gravity="center"
+                android:layout_marginTop="8dp">
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/modeSwitch"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="AI 추천 모드 "
+                    android:textColor="#424242"
+                    android:textSize="12sp"/>
+
+                <Button
+                    android:id="@+id/btnAddFixed"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:text="+ 고정"
+                    android:textSize="11sp"
+                    android:backgroundTint="#283593"
+                    android:textColor="#FFFFFF"
+                    android:paddingHorizontal="12dp"
+                    android:layout_marginStart="8dp"/>
+
+                <Button
+                    android:id="@+id/btnAutoSort"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:text="✨ 자동정렬"
+                    android:textSize="11sp"
+                    android:backgroundTint="#283593"
+                    android:textColor="#FFFFFF"
+                    android:paddingHorizontal="12dp"
+                    android:layout_marginStart="6dp"/>
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- ★ [상단 고정 영역 2] 스크롤 시에도 상단 고정되는 7일 날짜 탭 (토요일: 파란색 수정 완료) -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical">
+            android:orientation="horizontal"
+            android:paddingHorizontal="12dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="6dp"
+            android:background="#F8F9FA">
 
-            <!-- 상단 타이틀 영역 -->
-            <LinearLayout
-                android:id="@+id/headerLayout"
-                android:layout_width="match_parent"
+            <TextView
+                android:layout_width="36dp"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:paddingTop="16dp"
-                android:paddingHorizontal="16dp">
+                android:text="시간"
+                android:textSize="10sp"
+                android:textColor="#757575"
+                android:gravity="center"/>
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="RePlan"
-                    android:textStyle="bold"
-                    android:textColor="#283593"
-                    android:textSize="18sp"
-                    android:layout_gravity="center"/>
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center"
-                    android:layout_marginTop="4dp">
-
-                    <ImageButton
-                        android:id="@+id/btnPrevWeek"
-                        android:layout_width="36dp"
-                        android:layout_height="36dp"
-                        android:src="@android:drawable/ic_media_previous"
-                        android:background="?attr/selectableItemBackgroundBorderless"
-                        app:tint="#111111"
-                        android:contentDescription="이전주 이동" />
-
-                    <TextView
-                        android:id="@+id/tvWeekRange"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="8월 10일 - 8월 16일"
-                        android:textSize="20sp"
-                        android:textStyle="bold"
-                        android:textColor="#111111"
-                        android:layout_marginHorizontal="8dp"/>
-
-                    <ImageButton
-                        android:id="@+id/btnNextWeek"
-                        android:layout_width="36dp"
-                        android:layout_height="36dp"
-                        android:src="@android:drawable/ic_media_next"
-                        android:background="?attr/selectableItemBackgroundBorderless"
-                        app:tint="#111111"
-                        android:contentDescription="다음주 이동" />
-                </LinearLayout>
-
-                <LinearLayout
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:layout_gravity="center"
-                    android:layout_marginTop="8dp">
-
-                    <androidx.appcompat.widget.SwitchCompat
-                        android:id="@+id/modeSwitch"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="AI 추천 모드 "
-                        android:textColor="#424242"
-                        android:textSize="12sp"/>
-
-                    <Button
-                        android:id="@+id/btnAddFixed"
-                        android:layout_width="wrap_content"
-                        android:layout_height="36dp"
-                        android:text="+ 고정"
-                        android:textSize="11sp"
-                        android:backgroundTint="#283593"
-                        android:textColor="#FFFFFF"
-                        android:paddingHorizontal="12dp"
-                        android:layout_marginStart="8dp"/>
-
-                    <Button
-                        android:id="@+id/btnAutoSort"
-                        android:layout_width="wrap_content"
-                        android:layout_height="36dp"
-                        android:text="✨ 자동정렬"
-                        android:textSize="11sp"
-                        android:backgroundTint="#283593"
-                        android:textColor="#FFFFFF"
-                        android:paddingHorizontal="12dp"
-                        android:layout_marginStart="6dp"/>
-                </LinearLayout>
-            </LinearLayout>
-
-            <!-- 2. 타임라인 + 주간 플래너 영역 -->
             <LinearLayout
-                android:layout_width="match_parent"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:paddingHorizontal="12dp"
-                android:layout_marginTop="12dp">
+                android:layout_weight="1"
+                android:orientation="horizontal"
+                android:weightSum="7">
 
-                <!-- 요일 인덱스 헤더 -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:paddingBottom="6dp">
+                <TextView android:id="@+id/tvTabMon" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="10\n(월)" android:gravity="center" android:textStyle="bold" android:textColor="#333333" android:textSize="11sp" android:background="?attr/selectableItemBackground"/>
+                <TextView android:id="@+id/tvTabTue" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="11\n(화)" android:gravity="center" android:textStyle="bold" android:textColor="#333333" android:textSize="11sp" android:background="?attr/selectableItemBackground"/>
+                <TextView android:id="@+id/tvTabWed" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="12\n(수)" android:gravity="center" android:textStyle="bold" android:textColor="#333333" android:textSize="11sp" android:background="?attr/selectableItemBackground"/>
+                <TextView android:id="@+id/tvTabThu" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="13\n(목)" android:gravity="center" android:textStyle="bold" android:textColor="#333333" android:textSize="11sp" android:background="?attr/selectableItemBackground"/>
+                <TextView android:id="@+id/tvTabFri" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="14\n(금)" android:gravity="center" android:textStyle="bold" android:textColor="#333333" android:textSize="11sp" android:background="?attr/selectableItemBackground"/>
 
-                    <TextView
-                        android:layout_width="36dp"
-                        android:layout_height="wrap_content"
-                        android:text="시간"
-                        android:textSize="10sp"
-                        android:textColor="#757575"
-                        android:gravity="center"/>
+                <!-- ★ 토요일: 파란색(#1976D2)으로 개편 -->
+                <TextView android:id="@+id/tvTabSat" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="15\n(토)" android:gravity="center" android:textStyle="bold" android:textColor="#1976D2" android:textSize="11sp" android:background="?attr/selectableItemBackground"/>
 
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="horizontal"
-                        android:weightSum="7">
-                        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="월" android:gravity="center" android:textStyle="bold" android:textColor="#333333" android:textSize="12sp"/>
-                        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="화" android:gravity="center" android:textStyle="bold" android:textColor="#333333" android:textSize="12sp"/>
-                        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="수" android:gravity="center" android:textStyle="bold" android:textColor="#333333" android:textSize="12sp"/>
-                        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="목" android:gravity="center" android:textStyle="bold" android:textColor="#333333" android:textSize="12sp"/>
-                        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="금" android:gravity="center" android:textStyle="bold" android:textColor="#333333" android:textSize="12sp"/>
-                        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="토" android:gravity="center" android:textStyle="bold" android:textColor="#D32F2F" android:textSize="12sp"/>
-                        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="일" android:gravity="center" android:textStyle="bold" android:textColor="#D32F2F" android:textSize="12sp"/>
-                    </LinearLayout>
-                </LinearLayout>
-
-                <!-- 시간 축 + 요일 기둥 본체 (2시간 간격 적용) -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal">
-
-                    <!-- 좌측 시간 라벨 (00:00 ~ 22:00, 2시간당 52dp) -->
-                    <LinearLayout
-                        android:layout_width="36dp"
-                        android:layout_height="wrap_content"
-                        android:orientation="vertical"
-                        android:paddingTop="2dp">
-                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="00:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
-                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="02:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
-                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="04:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
-                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="06:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
-                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="08:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
-                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="10:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
-                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="12:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
-                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="14:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
-                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="16:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
-                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="18:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
-                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="20:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
-                        <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="22:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
-                    </LinearLayout>
-
-                    <!-- 7개 요일 세로 바구니 -->
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="horizontal"
-                        android:weightSum="7"
-                        android:minHeight="624dp">
-
-                        <LinearLayout android:id="@+id/containerMon" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center_horizontal"/>
-                        <LinearLayout android:id="@+id/containerTue" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center_horizontal"/>
-                        <LinearLayout android:id="@+id/containerWed" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center_horizontal"/>
-                        <LinearLayout android:id="@+id/containerThu" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center_horizontal"/>
-                        <LinearLayout android:id="@+id/containerFri" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center_horizontal"/>
-                        <LinearLayout android:id="@+id/containerSat" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center_horizontal"/>
-                        <LinearLayout android:id="@+id/containerSun" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center_horizontal"/>
-                    </LinearLayout>
-                </LinearLayout>
-
+                <!-- 일요일: 빨간색(#D32F2F) 유지 -->
+                <TextView android:id="@+id/tvTabSun" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="16\n(일)" android:gravity="center" android:textStyle="bold" android:textColor="#D32F2F" android:textSize="11sp" android:background="?attr/selectableItemBackground"/>
             </LinearLayout>
-
         </LinearLayout>
-    </androidx.core.widget.NestedScrollView>
+
+        <!-- 2. [스크롤 영역] 시간표 타임라인 세로 스크롤 -->
+        <androidx.core.widget.NestedScrollView
+            android:id="@+id/plannerScrollView"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:fillViewport="true"
+            android:paddingBottom="130dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingHorizontal="12dp">
+
+                <!-- 좌측 시간 라벨 (00:00 ~ 22:00) -->
+                <LinearLayout
+                    android:layout_width="36dp"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:paddingTop="2dp">
+                    <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="00:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
+                    <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="02:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
+                    <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="04:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
+                    <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="06:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
+                    <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="08:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
+                    <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="10:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
+                    <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="12:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
+                    <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="14:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
+                    <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="16:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
+                    <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="18:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
+                    <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="20:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
+                    <TextView android:layout_width="match_parent" android:layout_height="52dp" android:text="22:00" android:textSize="9sp" android:textColor="#9E9E9E" android:gravity="top|center_horizontal"/>
+                </LinearLayout>
+
+                <!-- 7개 요일 세로 바구니 -->
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="horizontal"
+                    android:weightSum="7"
+                    android:minHeight="624dp">
+
+                    <LinearLayout android:id="@+id/containerMon" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center_horizontal"/>
+                    <LinearLayout android:id="@+id/containerTue" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center_horizontal"/>
+                    <LinearLayout android:id="@+id/containerWed" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center_horizontal"/>
+                    <LinearLayout android:id="@+id/containerThu" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center_horizontal"/>
+                    <LinearLayout android:id="@+id/containerFri" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center_horizontal"/>
+                    <LinearLayout android:id="@+id/containerSat" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center_horizontal"/>
+                    <LinearLayout android:id="@+id/containerSun" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center_horizontal"/>
+                </LinearLayout>
+            </LinearLayout>
+        </androidx.core.widget.NestedScrollView>
+    </LinearLayout>
 
     <!-- 3. 위아래 가변 바텀시트 -->
     <androidx.cardview.widget.CardView

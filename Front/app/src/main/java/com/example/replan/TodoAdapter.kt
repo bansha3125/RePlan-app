@@ -10,7 +10,8 @@ import androidx.recyclerview.widget.RecyclerView
 
 class TodoAdapter(
     private val todoList: List<Todo>,
-    private val onItemClick: (Todo) -> Unit
+    private val onItemClick: (Todo) -> Unit,
+    private val onMenuClick: (Todo) -> Unit
 ) : RecyclerView.Adapter<TodoAdapter.TodoViewHolder>() {
 
     class TodoViewHolder(view: View) : RecyclerView.ViewHolder(view) {
@@ -19,6 +20,7 @@ class TodoAdapter(
         val tvDeadline: TextView = view.findViewById(R.id.tvTodoItemDeadline)
         val tvTime: TextView = view.findViewById(R.id.tvTodoItemTime)
         val tvAiSteps: TextView = view.findViewById(R.id.tvTodoItemAiSteps)
+        val tvMenu: TextView? = view.findViewById(R.id.tvMenu)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): TodoViewHolder {
@@ -28,11 +30,17 @@ class TodoAdapter(
 
     override fun onBindViewHolder(holder: TodoViewHolder, position: Int) {
         val todo = todoList[position]
-        holder.tvName.text = todo.name
-        holder.tvTime.text = "⏳ ${todo.expectedTime}시간 소요"
-        holder.tvPriority.text = "우선순위: ${todo.priority}"
 
-        // 우선순위별 색상 지정
+        // 1. 할 일 제목
+        holder.tvName.visibility = View.VISIBLE
+        holder.tvName.text = if (todo.name.isNullOrEmpty()) "제목 없음" else todo.name
+
+        // 2. 소요 시간
+        holder.tvTime.text = "⏳ ${todo.expectedTime}시간 소요"
+
+        // 3. 우선순위 뱃지 및 색상 설정
+        holder.tvPriority.visibility = View.VISIBLE
+        holder.tvPriority.text = "우선순위: ${todo.priority}"
         when (todo.priority) {
             "상" -> {
                 holder.tvPriority.setBackgroundColor(Color.parseColor("#FFEBEE"))
@@ -46,16 +54,20 @@ class TodoAdapter(
                 holder.tvPriority.setBackgroundColor(Color.parseColor("#E8F5E9"))
                 holder.tvPriority.setTextColor(Color.parseColor("#2E7D32"))
             }
+            else -> {
+                holder.tvPriority.setBackgroundColor(Color.parseColor("#E8EAF6"))
+                holder.tvPriority.setTextColor(Color.parseColor("#283593"))
+            }
         }
 
-        // 마감 기한 텍스트
+        // 4. 마감 기한 텍스트
         holder.tvDeadline.text = when (todo.deadlineType) {
             "DATE" -> "⏰ 특정 날짜 기준 마감"
-            "SCHEDULE" -> "⏰ 완료 목표: ${todo.specificScheduleName} 전 완료"
+            "SCHEDULE" -> "⏰ 완료 목표: ${todo.specificScheduleName ?: "특정 일정"} 전 완료"
             else -> "⏰ 마감 없음"
         }
 
-        // AI 작업 분해 뱃지
+        // 5. AI 작업 분해 뱃지
         if (todo.desiredSteps > 0) {
             holder.tvAiSteps.visibility = View.VISIBLE
             holder.tvAiSteps.text = "🤖 AI ${todo.desiredSteps}단계 작업 분해 요청됨"
@@ -63,18 +75,25 @@ class TodoAdapter(
             holder.tvAiSteps.visibility = View.GONE
         }
 
-        // ★ [완료 상태 스타일 처리] 흐려짐(투명도 0.45) & 취소선 적용
+        // 6. 완료 상태 스타일 처리 (흐려짐 및 취소선)
         if (todo.isCompleted) {
             holder.itemView.alpha = 0.45f
             holder.tvName.paintFlags = holder.tvName.paintFlags or Paint.STRIKE_THRU_TEXT_FLAG
+            holder.tvName.setTextColor(Color.parseColor("#888888"))
         } else {
             holder.itemView.alpha = 1.0f
             holder.tvName.paintFlags = holder.tvName.paintFlags and Paint.STRIKE_THRU_TEXT_FLAG.inv()
+            holder.tvName.setTextColor(Color.parseColor("#212121"))
         }
 
-        // 아이템 클릭 리스너
+        // 7. 카드 본문 클릭 리스너 (체크박스 AI 추천 바텀시트 열기)
         holder.itemView.setOnClickListener {
             onItemClick(todo)
+        }
+
+        // 8. 오른쪽 점 세 개 (⋮) 클릭 리스너 (수정/삭제 팝업 열기)
+        holder.tvMenu?.setOnClickListener {
+            onMenuClick(todo)
         }
     }
 
