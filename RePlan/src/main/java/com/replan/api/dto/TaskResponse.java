@@ -1,10 +1,12 @@
 package com.replan.api.dto;
 
-import lombok.Builder;
-import lombok.Getter;
+import lombok.*;
 
 @Getter
+@Setter
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class TaskResponse {
     private Long taskId;
     private String title;
@@ -12,4 +14,6 @@ public class TaskResponse {
     private int estimatedMinutes;
     private boolean completed;
     private Integer priority;
+
+    private int desiredSteps;
 }
