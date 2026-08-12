@@ -104,9 +104,23 @@ public class ScheduleService {
                 .build();
     }
 
-    public List<TaskResponse> getTasks(Long userId) {
+    public List<TaskResponse> getTasks(Long userId, String weekStartDateParam) {
+        LocalDate weekStartDate = (weekStartDateParam != null && !weekStartDateParam.isBlank())
+                ? LocalDate.parse(weekStartDateParam)
+                : getCurrentWeekStart();
+
+        LocalDate weekEndDate = weekStartDate.plusDays(6);
+        LocalDateTime startDateTime = weekStartDate.atStartOfDay();
+        LocalDateTime endDateTime = weekEndDate.atTime(23, 59, 59);
+
         return taskRepository.findByUserId(userId)
                 .stream()
+                .filter(task -> {
+                    if (task.getDeadline() == null) {
+                        return false;
+                    }
+                    return !task.getDeadline().isBefore(startDateTime) && !task.getDeadline().isAfter(endDateTime);
+                })
                 .sorted(Comparator.comparing(Task::isCompleted)
                         .thenComparing(Task::getDeadline, Comparator.nullsLast(Comparator.naturalOrder())))
                 .map(task -> TaskResponse.builder()
