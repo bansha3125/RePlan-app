@@ -128,6 +128,8 @@ object ApiClient {
         val newRequest = originalRequest.newBuilder()
             .header("X-Device-UUID", uuid)
             .header("Content-Type", "application/json")
+            // ★ [핵심 추가] ngrok HTML 경고 페이지 우회용 필수 헤더
+            .header("ngrok-skip-browser-warning", "true")
             .build()
 
         chain.proceed(newRequest)
