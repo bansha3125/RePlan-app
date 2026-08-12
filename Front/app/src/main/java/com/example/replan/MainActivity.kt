@@ -1267,11 +1267,26 @@ class MainActivity : AppCompatActivity() {
 
         val isNotDecomposed = todo.desiredSteps == 0
 
+        // 실제 바텀시트에 그려질 단계 목록 생성
+        val actualStepsList = if (isNotDecomposed) {
+            listOf("1단계: [${todo.name}] ${todo.name}")
+        } else if (matchedSchedules.isNotEmpty()) {
+            matchedSchedules.mapIndexed { index, gen ->
+                val cleanTitle = gen.title.replace(Regex("\\[.*?\\]"), "").trim()
+                "${index + 1}단계: [${todo.name}] $cleanTitle"
+            }
+        } else {
+            List(todo.desiredSteps) { index -> "${index + 1}단계: [${todo.name}] ${todo.name}" }
+        }
+
+        // ★ [핵심 수정] 상단 텍스트의 총 단계 수치를 actualStepsList.size 기준으로 동적 바인딩
+        val totalStepCount = if (isNotDecomposed) 1 else actualStepsList.size
+
         val tvSubTitle = TextView(this).apply {
             text = if (isNotDecomposed) {
                 "📝 단일 작업 계획\n[${todo.name}] (${if (todo.isCompleted) 1 else 0}/1단계 완료)"
             } else {
-                "🤖 RePlan AI 추천 계획\n[${todo.name}] (${completedSteps.size}/${todo.desiredSteps}단계 완료)"
+                "🤖 RePlan AI 추천 계획\n[${todo.name}] (${completedSteps.size}/${totalStepCount}단계 완료)"
             }
             textSize = 14f
             setTypeface(null, Typeface.BOLD)
@@ -1279,22 +1294,6 @@ class MainActivity : AppCompatActivity() {
             setPadding(0, dpToPx(6), 0, dpToPx(16))
         }
         rootLayout.addView(tvSubTitle)
-
-// showAiDecompositionBottomSheet() 내부
-
-        val actualStepsList = if (isNotDecomposed) {
-            listOf("1단계: [${todo.name}] ${todo.name}")
-        } else if (matchedSchedules.isNotEmpty()) {
-            matchedSchedules.mapIndexed { index, gen ->
-                // 백엔드에서 넘어온 제목에서 기존 [태그] 제거 후 순수 텍스트만 추출
-                val cleanTitle = gen.title.replace(Regex("\\[.*?\\]"), "").trim()
-
-                // "N단계: [할 일 이름] 세부 내용" 포맷으로 조립
-                "${index + 1}단계: [${todo.name}] $cleanTitle"
-            }
-        } else {
-            List(todo.desiredSteps) { index -> "${index + 1}단계: [${todo.name}] ${todo.name}" }
-        }
 
         actualStepsList.forEachIndexed { index, stepText ->
             val checkBox = CheckBox(this).apply {
@@ -1343,13 +1342,14 @@ class MainActivity : AppCompatActivity() {
                         requestUpdateScheduleStatus(gen = gen, completed = checked)
                     }
 
+                    // 체크 시 상단 텍스트 수치 실시간 업데이트
                     tvSubTitle.text = if (isNotDecomposed) {
                         "📝 단일 작업 계획\n[${todo.name}] (${if (checked) 1 else 0}/1단계 완료)"
                     } else {
-                        "🤖 RePlan AI 추천 계획\n[${todo.name}] (${completedSteps.size}/${actualStepsList.size}단계 완료)"
+                        "🤖 RePlan AI 추천 계획\n[${todo.name}] (${completedSteps.size}/${totalStepCount}단계 완료)"
                     }
 
-                    val isAllDone = if (isNotDecomposed) checked else (completedSteps.size == actualStepsList.size)
+                    val isAllDone = if (isNotDecomposed) checked else (completedSteps.size == totalStepCount)
 
                     val actualTodoInList = todoList.find { it.id == todo.id || it.name == todo.name } ?: todo
                     actualTodoInList.isCompleted = isAllDone
