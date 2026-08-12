@@ -39,13 +39,16 @@ data class GeneratedScheduleDto(
 // =========================================================================
 
 // 일반 할 일 추가 (POST /schedules/tasks)
+// networkdto.kt 내 수정 대상
+
 data class CreateTaskApiRequest(
-    @SerializedName("userId") val userId: Long = 1L, // ★ 백엔드 필수 필드 추가
+    @SerializedName("userId") val userId: Long = 1L,
     @SerializedName("title") val title: String,
     @SerializedName("deadline") val deadline: String? = null,
     @SerializedName("estimatedMinutes") val estimatedMinutes: Int,
-    @SerializedName("useAiDecomposition") val useAiDecomposition: Boolean = false,
-    @SerializedName("desiredSteps") val desiredSteps: Int = 0,
+    // ★ [핵심 수정] 백엔드 AI 쪼개기가 유실되지 않도록 기본값 true / 3단계 설정
+    @SerializedName("useAiDecomposition") val useAiDecomposition: Boolean = true,
+    @SerializedName("desiredSteps") val desiredSteps: Int = 3,
     @SerializedName("deadlineType") val deadlineType: String? = "DATE",
     @SerializedName("linkedScheduleId") val linkedScheduleId: Long? = null,
     @SerializedName("priority") val priority: Int? = 2

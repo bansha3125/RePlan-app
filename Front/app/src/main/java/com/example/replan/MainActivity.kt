@@ -199,7 +199,8 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        var desiredSteps = if (todo.desiredSteps > 0) todo.desiredSteps else 3
+        // ★ [핵심 수정 1] 기존 todo.desiredSteps 수치(0, 3, 5, 7)를 있는 그대로 유지
+        var desiredSteps = todo.desiredSteps
         val aiButtons = listOfNotNull(btnAiNone, btnAi3Steps, btnAi5Steps, btnAi7Steps)
         val stepValues = listOf(0, 3, 5, 7)
 
@@ -235,14 +236,20 @@ class MainActivity : AppCompatActivity() {
             val expectedMinutes = if (updatedTimeStr.isEmpty()) 120 else updatedTimeStr.toInt() * 60
             val taskIdLong = todo.id.toLongOrNull() ?: return@setOnClickListener
 
+            // ★ [핵심 수정 2] desiredSteps > 0 판단으로 useAiDecomposition 상태 명확히 전달
+            val isUseAi = desiredSteps > 0
+
             val updateRequest = CreateTaskApiRequest(
+                userId = 1L,
                 title = updatedName,
                 deadline = getSelectedWeekSundayDeadline(),
                 estimatedMinutes = expectedMinutes,
                 priority = selectedPriorityInt,
-                useAiDecomposition = (desiredSteps > 0),
+                useAiDecomposition = isUseAi,
                 desiredSteps = desiredSteps
             )
+
+            Log.d("SEND_CHECK", "📤 [Task 수정 요청] taskId: $taskIdLong | useAiDecomposition: ${updateRequest.useAiDecomposition} | desiredSteps: ${updateRequest.desiredSteps}")
 
             bottomSheetDialog.dismiss()
 
@@ -251,13 +258,17 @@ class MainActivity : AppCompatActivity() {
                     try {
                         val response = ApiClient.service.updateTask(taskId = taskIdLong, request = updateRequest)
                         if (response.isSuccessful) {
+                            Log.d("SEND_CHECK", "✅ 수정 성공")
                             Toast.makeText(this@MainActivity, "'$updatedName' 수정 완료!", Toast.LENGTH_SHORT).show()
                             loadWeeklySchedulesFromServer()
                         } else {
-                            Toast.makeText(this@MainActivity, "수정 실패", Toast.LENGTH_SHORT).show()
+                            val errorStr = response.errorBody()?.string() ?: "알 수 없는 에러"
+                            Log.e("SEND_CHECK", "❌ 수정 실패 (${response.code()}): $errorStr")
+                            Toast.makeText(this@MainActivity, "수정 실패 (${response.code()})", Toast.LENGTH_SHORT).show()
                         }
                     } catch (e: Exception) {
                         e.printStackTrace()
+                        Log.e("SEND_CHECK", "💥 통신 예외 발생: ${e.message}")
                         Toast.makeText(this@MainActivity, "수정 실패: ${e.message}", Toast.LENGTH_SHORT).show()
                     }
                 }
@@ -906,6 +917,8 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // MainActivity.kt - showAddTodoBottomSheet() 내부 등록 버튼 클릭 이벤트
+
         btnRegisterTodo?.setOnClickListener {
             val todoName = etTodoName?.text?.toString()?.trim() ?: ""
             val expectedTimeStr = etExpectedTime?.text?.toString()?.trim() ?: ""
@@ -915,32 +928,32 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
 
-            // 소요 시간 예외 처리 (기본 2시간 = 120분)
             val expectedMinutes = try {
                 if (expectedTimeStr.isEmpty()) 120 else expectedTimeStr.toInt() * 60
             } catch (e: Exception) {
                 120
             }
 
-            // 백엔드 파싱 에러 방지용 마감일 안전 추출 (YYYY-MM-DD)
             val safeDeadlineDate = try {
                 getSelectedWeekSundayDeadline()
             } catch (e: Exception) {
                 getSelectedWeekStartDate()
             }
 
+            // ★ [핵심] 0단계가 아니면 무조건 useAiDecomposition = true 보장
+            val isUseAi = desiredSteps > 0
+
             val apiRequest = CreateTaskApiRequest(
                 title = todoName,
                 deadline = safeDeadlineDate,
                 estimatedMinutes = expectedMinutes,
-                priority = selectedPriorityInt,
-                useAiDecomposition = (desiredSteps > 0),
-                desiredSteps = desiredSteps,
-                deadlineType = "DATE",
-                linkedScheduleId = null
+                useAiDecomposition = isUseAi,  // true/false 명시 전송
+                desiredSteps = desiredSteps,    // 3, 5, 7 수치 명시 전송
+                priority = selectedPriorityInt
             )
 
-            Log.d("SEND_CHECK", "📤 백엔드 등록 시도 [JSON 데이터]: $apiRequest")
+            // ★ 보낼 데이터 로그 출력
+            Log.d("SEND_CHECK", "📤 [최종 백엔드 전송 데이터]: $apiRequest")
 
             bottomSheetDialog.dismiss()
 
@@ -953,14 +966,13 @@ class MainActivity : AppCompatActivity() {
                             Toast.makeText(this@MainActivity, "'${apiRequest.title}' 등록 완료!", Toast.LENGTH_SHORT).show()
                             loadWeeklySchedulesFromServer()
                         } else {
-                            // 500 등 에러 발생 시 백엔드가 던진 상세 메세지 출력
-                            val errorBodyStr = response.errorBody()?.string() ?: "알 수 없는 백엔드 에러"
-                            Log.e("SEND_CHECK", "❌ 저장 실패 코드: ${response.code()} | 백엔드 에러 내용: $errorBodyStr")
-                            Toast.makeText(this@MainActivity, "저장 실패 (코드 ${response.code()}) - 백엔드 로그 확인", Toast.LENGTH_LONG).show()
+                            val errorStr = response.errorBody()?.string() ?: "알 수 없는 에러"
+                            Log.e("SEND_CHECK", "❌ 저장 실패 (${response.code()}): $errorStr")
+                            Toast.makeText(this@MainActivity, "저장 실패 (${response.code()})", Toast.LENGTH_SHORT).show()
                         }
                     } catch (e: Exception) {
                         e.printStackTrace()
-                        Log.e("SEND_CHECK", "💥 네트워크 통신 예외 발생: ${e.message}")
+                        Log.e("SEND_CHECK", "💥 통신 에러: ${e.message}")
                         Toast.makeText(this@MainActivity, "통신 에러: ${e.message}", Toast.LENGTH_SHORT).show()
                     }
                 }
@@ -1370,6 +1382,8 @@ class MainActivity : AppCompatActivity() {
 
         bottomSheetDialog.setContentView(rootLayout)
         bottomSheetDialog.show()
+
+        Log.d("FRONT_CHECK", "백엔드가 준 원본 데이터: ${matchedSchedules.map { it.title }}")
     }
 
     private fun updateTodoCardCompletion(targetTodo: Todo, isAllCompleted: Boolean) {
