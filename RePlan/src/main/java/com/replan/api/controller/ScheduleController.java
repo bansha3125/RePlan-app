@@ -9,12 +9,14 @@ import com.replan.api.repository.FixedScheduleRepository;
 import com.replan.api.repository.TaskRepository;
 import com.replan.api.service.ScheduleService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
 
+@Slf4j
 @RestController
 @RequestMapping("/schedules")
 @RequiredArgsConstructor
@@ -101,14 +103,17 @@ public class ScheduleController {
     @PostMapping("/generate")
     public String generateAiSchedule(
             @CurrentDevice User user,
-            @RequestBody java.util.Map<String, Object> requestBody
+            @RequestBody(required = false) java.util.Map<String, Object> requestBody // required = false로 변경
     ) {
-        String weekStartDate = requestBody.get("weekStartDate") != null
-                ? requestBody.get("weekStartDate").toString()
-                : null;
+        String weekStartDate = null;
+        if (requestBody != null && requestBody.get("weekStartDate") != null) {
+            weekStartDate = requestBody.get("weekStartDate").toString();
+        }
+
+        log.info("[CONTROLLER 진입] /schedules/generate 호출됨 user={}, weekStartDate={}", user != null ? user.getId() : "null", weekStartDate);
 
         scheduleService.generateAiSchedule(user.getId(), weekStartDate);
-        return "AI 스케줄 생성 및 DB 저장 요청 완료!";
+        return "AI 스케줄 생성 및 DB 저장 요청 완료";
     }
 
     @PostMapping("/replan")
@@ -116,6 +121,9 @@ public class ScheduleController {
             @CurrentDevice User user,
             @RequestBody java.util.Map<String, Object> requestBody
     ) {
+        // ★ 2. replan 진입 로그 찍기!
+        log.info("[CONTROLLER 진입] /schedules/replan 호출됨 user={}, body={}", user != null ? user.getId() : "null", requestBody);
+
         String replanFromTime = (String) requestBody.get("replanFromTime");
 
         @SuppressWarnings("unchecked")
