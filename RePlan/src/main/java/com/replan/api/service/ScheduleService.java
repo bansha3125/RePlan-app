@@ -130,6 +130,7 @@ public class ScheduleService {
                         .estimatedMinutes(task.getEstimatedMinutes())
                         .completed(task.isCompleted())
                         .priority(task.getPriority())
+                        .desiredSteps(task.getDesiredSteps())
                         .build())
                 .toList();
     }
@@ -257,13 +258,48 @@ public class ScheduleService {
         List<AiScheduleBlockResponse> generatedBlocks =
                 extractGeneratedBlocks(response);
 
+        Map<Long, Integer> taskDesiredStepsMap = aiTasks.stream()
+                .filter(task -> task.getTaskId() != null && !task.getTaskId().isBlank())
+                .collect(Collectors.toMap(
+                        task -> Long.valueOf(task.getTaskId()),
+                        task -> task.getDesiredSteps(),
+                        (existing, replacement) -> existing
+                ));
+
+        Map<String, List<AiScheduleBlockResponse>> groupedByTask = generatedBlocks.stream()
+                .filter(block -> block.getTaskId() != null && !block.getTaskId().isBlank())
+                .collect(Collectors.groupingBy(AiScheduleBlockResponse::getTaskId));
+
+        List<AiScheduleBlockResponse> safelyControlledBlocks = new ArrayList<>();
+
+        for (Map.Entry<String, List<AiScheduleBlockResponse>> entry : groupedByTask.entrySet()) {
+            Long taskId = Long.valueOf(entry.getKey());
+            List<AiScheduleBlockResponse> blocks = entry.getValue();
+
+            blocks.sort(Comparator.comparing(b -> b.getStepOrder() != null ? b.getStepOrder() : 0));
+
+            Integer maxSteps = taskDesiredStepsMap.get(taskId);
+            if (maxSteps != null && maxSteps > 0 && blocks.size() > maxSteps) {
+                log.warn("AI가 요청된 단계 수({})를 초과하여 {}개의 블록을 생성했습니다. taskId={} 블록을 {}개로 슬라이싱합니다.",
+                        maxSteps, blocks.size(), taskId, maxSteps);
+                blocks = blocks.subList(0, maxSteps);
+            }
+            safelyControlledBlocks.addAll(blocks);
+        }
+
+        for (AiScheduleBlockResponse block : generatedBlocks) {
+            if (block.getTaskId() == null || block.getTaskId().isBlank()) {
+                safelyControlledBlocks.add(block);
+            }
+        }
+
         log.info(
                 "AI 스케줄 생성 성공: 생성 일정 {}개, 미배치 작업 {}개",
-                generatedBlocks.size(),
+                safelyControlledBlocks.size(),
                 sizeOf(response.getUnscheduledTasks())
         );
 
-        saveGeneratedSchedules(generatedBlocks, userId);
+        saveGeneratedSchedules(safelyControlledBlocks, userId);
         logAiWarnings(response);
     }
 
