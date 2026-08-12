@@ -1,71 +1,91 @@
 package com.example.replan
 
 import android.graphics.Color
+import android.graphics.Paint
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
+import androidx.appcompat.widget.PopupMenu
+import androidx.cardview.widget.CardView
 import androidx.recyclerview.widget.RecyclerView
 
 class TodoAdapter(
     private val todoList: List<Todo>,
-    // 🌟 [추가] 카드가 클릭되었을 때 메인화면에 알려주는 리스너를 매개변수로 받습니다!
-    private val onItemClick: (Todo) -> Unit
+    private val onItemClick: (Todo) -> Unit,
+    private val onEditClick: (Todo) -> Unit,   // ★ 수정 클릭 전용 콜백
+    private val onDeleteClick: (Todo) -> Unit  // ★ 삭제 클릭 전용 콜백
 ) : RecyclerView.Adapter<TodoAdapter.TodoViewHolder>() {
 
-    class TodoViewHolder(view: View) : RecyclerView.ViewHolder(view) {
-        val tvName: TextView = view.findViewById(R.id.tvTodoItemName)
-        val tvPriority: TextView = view.findViewById(R.id.tvTodoItemPriority)
-        val tvDeadline: TextView = view.findViewById(R.id.tvTodoItemDeadline)
-        val tvTime: TextView = view.findViewById(R.id.tvTodoItemTime)
-        val tvAiSteps: TextView = view.findViewById(R.id.tvTodoItemAiSteps)
+    class TodoViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        val cardView: CardView? = itemView as? CardView
+        private val context = itemView.context
+        private val resources = context.resources
+        private val packageName = context.packageName
+
+        private fun <T : View> findView(idName: String): T? {
+            val id = resources.getIdentifier(idName, "id", packageName)
+            return if (id != 0) itemView.findViewById(id) else null
+        }
+
+        val tvName: TextView? = findView("tvTodoItemName") ?: findView("tvTodoName")
+        val tvTime: TextView? = findView("tvTodoItemTime") ?: findView("tvExpectedTime")
+        val tvPriority: TextView? = findView("tvTodoItemPriority") ?: findView("tvPriority")
+        val btnMenu: View? = findView("tvMenu") ?: findView("btnMenu")
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): TodoViewHolder {
-        val view = LayoutInflater.from(parent.context).inflate(R.layout.item_todo, parent, false)
+        val layoutId = parent.context.resources.getIdentifier("item_todo", "layout", parent.context.packageName)
+        val view = LayoutInflater.from(parent.context).inflate(layoutId, parent, false)
         return TodoViewHolder(view)
     }
 
     override fun onBindViewHolder(holder: TodoViewHolder, position: Int) {
         val todo = todoList[position]
-        holder.tvName.text = todo.name
-        holder.tvTime.text = "⏳ ${todo.expectedTime}시간 소요"
-        holder.tvPriority.text = "우선순위: ${todo.priority}"
 
-        // 우선순위별로 색깔 다르게 주기
-        when (todo.priority) {
-            "상" -> {
-                holder.tvPriority.setBackgroundColor(Color.parseColor("#FFEBEE"))
-                holder.tvPriority.setTextColor(Color.parseColor("#C62828"))
-            }
-            "중" -> {
-                holder.tvPriority.setBackgroundColor(Color.parseColor("#E8EAF6"))
-                holder.tvPriority.setTextColor(Color.parseColor("#283593"))
-            }
-            "하" -> {
-                holder.tvPriority.setBackgroundColor(Color.parseColor("#E8F5E9"))
-                holder.tvPriority.setTextColor(Color.parseColor("#2E7D32"))
-            }
-        }
+        holder.tvName?.text = todo.name
 
-        // 마감 기한 텍스트 동적 분기
-        holder.tvDeadline.text = when (todo.deadlineType) {
-            "DATE" -> "⏰ 특정 날짜 기준 마감"
-            "SCHEDULE" -> "⏰ 완료 목표: ${todo.specificScheduleName} 전 완료"
-            else -> "⏰ 마감 없음"
-        }
+        val stepsText = if (todo.desiredSteps > 0) " | 🤖 ${todo.desiredSteps}단계" else ""
+        holder.tvTime?.text = "⌛ ${todo.expectedTime}시간 소요$stepsText"
+        holder.tvPriority?.text = "우선순위: ${todo.priority}"
 
-        // AI 작업 분해 뱃지 활성화 여부
-        if (todo.desiredSteps > 0) {
-            holder.tvAiSteps.visibility = View.VISIBLE
-            holder.tvAiSteps.text = "🤖 AI ${todo.desiredSteps}단계 작업 분해 요청됨"
+        if (todo.isCompleted) {
+            holder.cardView?.setCardBackgroundColor(Color.parseColor("#E0E0E0"))
+            holder.tvName?.apply {
+                paintFlags = paintFlags or Paint.STRIKE_THRU_TEXT_FLAG
+                setTextColor(Color.parseColor("#757575"))
+            }
         } else {
-            holder.tvAiSteps.visibility = View.GONE
+            holder.cardView?.setCardBackgroundColor(Color.WHITE)
+            holder.tvName?.apply {
+                paintFlags = paintFlags and Paint.STRIKE_THRU_TEXT_FLAG.inv()
+                setTextColor(Color.parseColor("#212121"))
+            }
         }
 
-        // 🌟 [추가] 아이템 카드 전체 영역 터치 이벤트 연결!
-        holder.itemView.setOnClickListener {
-            onItemClick(todo)
+        // 전체 카드 클릭 -> AI 쪼개기 바텀시트
+        holder.itemView.setOnClickListener { onItemClick(todo) }
+
+        // ★ 점 3개 메뉴 선택 시 중간 과정(1번 사진) 없이 바로 해당 화면으로 연결
+        holder.btnMenu?.setOnClickListener { view ->
+            val popup = PopupMenu(view.context, view)
+            popup.menu.add(0, 1, 0, "✏️ 수정하기")
+            popup.menu.add(0, 2, 1, "🗑️ 삭제하기")
+
+            popup.setOnMenuItemClickListener { item ->
+                when (item.itemId) {
+                    1 -> {
+                        onEditClick(todo) // ✏️ 수정 바텀시트 바로 연결
+                        true
+                    }
+                    2 -> {
+                        onDeleteClick(todo) // 🗑️ 삭제 확인 다이얼로그(3번 사진) 바로 연결
+                        true
+                    }
+                    else -> false
+                }
+            }
+            popup.show()
         }
     }
 

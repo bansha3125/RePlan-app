@@ -16,7 +16,7 @@
         android:orientation="vertical"
         android:padding="16dp">
 
-        <!-- 상단: 할 일 이름 & 우선순위 뱃지 -->
+        <!-- 상단: 할 일 이름 & 우선순위 뱃지 & 수정/삭제 메뉴 버튼 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -34,7 +34,7 @@
                 android:textSize="16sp"
                 android:textStyle="bold" />
 
-            <!-- 우선순위 표시용 텍스트뷰 (배경 라운드 처리) -->
+            <!-- 우선순위 표시용 텍스트뷰 -->
             <TextView
                 android:id="@+id/tvTodoItemPriority"
                 android:layout_width="wrap_content"
@@ -46,23 +46,29 @@
                 android:background="#E8EAF6"
                 android:paddingHorizontal="8dp"
                 android:paddingVertical="4dp"/>
+
+            <!-- 오른쪽 끝 세로 점 세 개 (⋮) 버튼 (터치 포커스 및 ID 최적화) -->
+            <TextView
+                android:id="@+id/tvMenu"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:layout_marginStart="4dp"
+                android:text="⋮"
+                android:textColor="#757575"
+                android:textSize="20sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:focusable="false"/>
         </LinearLayout>
 
-        <!-- 하단: 마감일/연동 정보 & 예상 소요 시간 -->
+        <!-- 하단: 예상 소요 시간 및 AI 단계 뱃지 영역 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical">
-
-            <TextView
-                android:id="@+id/tvTodoItemDeadline"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="⏰ 목요일 데이터구조 수업 전까지"
-                android:textColor="#757575"
-                android:textSize="12sp" />
 
             <TextView
                 android:id="@+id/tvTodoItemTime"
@@ -72,22 +78,22 @@
                 android:textColor="#283593"
                 android:textStyle="bold"
                 android:textSize="12sp" />
-        </LinearLayout>
 
-        <!-- AI 단계 뱃지 (AI 분해를 신청한 경우에만 노출할 예정!) -->
-        <TextView
-            android:id="@+id/tvTodoItemAiSteps"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="🤖 AI 5단계 분해 활성화"
-            android:textColor="#00796B"
-            android:textSize="11sp"
-            android:textStyle="bold"
-            android:background="#E0F2F1"
-            android:paddingHorizontal="8dp"
-            android:paddingVertical="3dp"
-            android:layout_marginTop="8dp"
-            android:visibility="gone"/>
+            <!-- AI 단계 뱃지 -->
+            <TextView
+                android:id="@+id/tvTodoItemAiSteps"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="🤖 AI 5단계 분해 활성화"
+                android:textColor="#00796B"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:background="#E0F2F1"
+                android:paddingHorizontal="8dp"
+                android:paddingVertical="3dp"
+                android:visibility="gone"/>
+        </LinearLayout>
 
     </LinearLayout>
 </androidx.cardview.widget.CardView>
