@@ -59,10 +59,12 @@ public class ScheduleController {
     }
 
     @GetMapping("/tasks")
-    public List<TaskResponse> getTasks(@CurrentDevice User user) {
-        return scheduleService.getTasks(user.getId());
+    public List<TaskResponse> getTasks(
+            @CurrentDevice User user,
+            @RequestParam(required = false) String weekStartDate
+    ) {
+        return scheduleService.getTasks(user.getId(), weekStartDate);
     }
-
     @PatchMapping("/tasks/{taskId}")
     public ResponseEntity<Void> updateTask(
             @PathVariable Long taskId,
