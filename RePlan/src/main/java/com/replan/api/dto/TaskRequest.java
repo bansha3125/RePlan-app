@@ -1,5 +1,6 @@
 package com.replan.api.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -18,12 +19,15 @@ public class TaskRequest {
     private Long userId;
     private String title;
     private String deadline;
-    private int estimatedMinutes;
+    private Integer estimatedMinutes;
+
+    @JsonProperty("useAiDecomposition") // 추가
     private Boolean useAiDecomposition;
-    private int desiredSteps;
+
+    @JsonProperty("desiredSteps") // 추가
+    private Integer desiredSteps;
 
     private String deadlineType;
     private Long linkedScheduleId;
-
     private Integer priority;
 }

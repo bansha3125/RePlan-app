@@ -258,14 +258,6 @@ public class ScheduleService {
         List<AiScheduleBlockResponse> generatedBlocks =
                 extractGeneratedBlocks(response);
 
-        Map<Long, Integer> taskDesiredStepsMap = aiTasks.stream()
-                .filter(task -> task.getTaskId() != null && !task.getTaskId().isBlank())
-                .collect(Collectors.toMap(
-                        task -> Long.valueOf(task.getTaskId()),
-                        task -> task.getDesiredSteps(),
-                        (existing, replacement) -> existing
-                ));
-
         Map<String, List<AiScheduleBlockResponse>> groupedByTask = generatedBlocks.stream()
                 .filter(block -> block.getTaskId() != null && !block.getTaskId().isBlank())
                 .collect(Collectors.groupingBy(AiScheduleBlockResponse::getTaskId));
@@ -273,17 +265,10 @@ public class ScheduleService {
         List<AiScheduleBlockResponse> safelyControlledBlocks = new ArrayList<>();
 
         for (Map.Entry<String, List<AiScheduleBlockResponse>> entry : groupedByTask.entrySet()) {
-            Long taskId = Long.valueOf(entry.getKey());
             List<AiScheduleBlockResponse> blocks = entry.getValue();
 
             blocks.sort(Comparator.comparing(b -> b.getStepOrder() != null ? b.getStepOrder() : 0));
 
-            Integer maxSteps = taskDesiredStepsMap.get(taskId);
-            if (maxSteps != null && maxSteps > 0 && blocks.size() > maxSteps) {
-                log.warn("AI가 요청된 단계 수({})를 초과하여 {}개의 블록을 생성했습니다. taskId={} 블록을 {}개로 슬라이싱합니다.",
-                        maxSteps, blocks.size(), taskId, maxSteps);
-                blocks = blocks.subList(0, maxSteps);
-            }
             safelyControlledBlocks.addAll(blocks);
         }
 
@@ -356,29 +341,28 @@ public class ScheduleService {
         return taskRepository.findByUserId(userId)
                 .stream()
                 .map(task -> {
-                    // 프론트/DB의 3단계(상중하 또는 1,2,3)를 AI가 요구하는 1~5 단계로 매핑
                     int mappedPriority = convertPriorityToAiScale(task.getPriority());
+
+                    // ★ 프론트엔드가 보내지 않아 null인 값들을 안전하게 방어!
+                    int difficulty = (task.getDifficulty() != null && task.getDifficulty() > 0) ? task.getDifficulty() : 3;
+                    int focusRequired = (task.getFocusRequired() != null && task.getFocusRequired() > 0) ? task.getFocusRequired() : 3;
+                    int desiredSteps = (task.getDesiredSteps() > 0) ? task.getDesiredSteps() : 3;
 
                     return AiTaskRequest.builder()
                             .taskId(String.valueOf(task.getTaskId()))
                             .title(task.getTitle())
                             .estimatedMinutes(task.getEstimatedMinutes())
                             .deadline(task.getDeadline().toString())
-
-                            /*
-                             * AI 명세상 필수값이다.
-                             * 현재 TaskRequest/Task Entity에 연결된 필드가 없어 임시 기본값 사용.
-                             */
                             .priority(mappedPriority)
-                            .difficulty(task.getDifficulty())
-                            .focusRequired(task.getFocusRequired())
+                            .difficulty(difficulty)        // 방어한 값 적용
+                            .focusRequired(focusRequired)  // 방어한 값 적용
                             .postponeCount(task.getPostponeCount())
                             .completedMinutes(task.getCompletedMinutes())
                             .remainingMinutes(task.getEstimatedMinutes())
                             .completed(task.isCompleted())
                             .prerequisiteTaskIds(new ArrayList<>())
                             .useAiDecomposition(task.isUseAiDecomposition())
-                            .desiredSteps(task.getDesiredSteps())
+                            .desiredSteps(desiredSteps)
                             .build();
                 })
                 .toList();
@@ -555,9 +539,46 @@ public class ScheduleService {
          */
         generatedRepository.deleteByUserId(userId);
 
-        List<GeneratedSchedule> newSchedules = new ArrayList<>();
+        // [핵심 세이프가드 추가] Task별로 유저가 요청한 desiredSteps(목표 단계 수)를 가져와서 정확히 그 개수만큼만 limit 걸기
+        List<Task> userTasks = taskRepository.findByUserId(userId);
+        Map<Long, Integer> taskDesiredStepsMap = userTasks.stream()
+                .collect(Collectors.toMap(Task::getTaskId, Task::getDesiredSteps, (existing, replacement) -> existing));
+
+        List<AiScheduleBlockResponse> controlledAiResponse = new ArrayList<>();
         if (aiResponse != null && !aiResponse.isEmpty()) {
-            newSchedules = aiResponse.stream()
+            // taskId별로 블록들을 그룹화
+            Map<String, List<AiScheduleBlockResponse>> groupedByTask = aiResponse.stream()
+                    .filter(block -> block.getTaskId() != null && !block.getTaskId().isBlank())
+                    .collect(Collectors.groupingBy(AiScheduleBlockResponse::getTaskId));
+
+            for (Map.Entry<String, List<AiScheduleBlockResponse>> entry : groupedByTask.entrySet()) {
+                String taskIdStr = entry.getKey();
+                List<AiScheduleBlockResponse> blocks = entry.getValue();
+                Long taskId = parseLongTaskId(taskIdStr);
+
+                // stepOrder 순서대로 정렬
+                blocks.sort(Comparator.comparing(b -> b.getStepOrder() != null ? b.getStepOrder() : 0));
+
+                // 해당 Task의 desiredSteps 가져오기 (없으면 제한 없이 다 허용)
+                Integer targetSteps = taskId != null ? taskDesiredStepsMap.get(taskId) : null;
+
+                if (targetSteps != null && targetSteps > 0 && blocks.size() > targetSteps) {
+                    log.warn("AI가 요청된 단계 수({})를 초과하여 {}개의 블록을 생성했습니다. taskId={} 블록을 limit({})하여 잘라냅니다.",
+                            targetSteps, blocks.size(), taskId, targetSteps);
+                    blocks = blocks.stream().limit(targetSteps).collect(Collectors.toList());
+                }
+                controlledAiResponse.addAll(blocks);
+            }
+
+            // taskId가 없는 블록(일반 블록 등)도 그대로 포함
+            aiResponse.stream()
+                    .filter(block -> block.getTaskId() == null || block.getTaskId().isBlank())
+                    .forEach(controlledAiResponse::add);
+        }
+
+        List<GeneratedSchedule> newSchedules = new ArrayList<>();
+        if (!controlledAiResponse.isEmpty()) {
+            newSchedules = controlledAiResponse.stream()
                     .map(block -> {
                         Long parsedTaskId = parseLongTaskId(block.getTaskId());
 
