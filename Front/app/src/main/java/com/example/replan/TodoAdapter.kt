@@ -45,9 +45,38 @@ class TodoAdapter(
 
         holder.tvName?.text = todo.name
 
-        val stepsText = if (todo.desiredSteps > 0) " | 🤖 ${todo.desiredSteps}단계" else ""
+        // 소요시간 & AI 단계 표시 부분
+        val stepsText = if (todo.desiredSteps > 0) {
+            " | 🤖 ${todo.desiredSteps}단계"  // 쪼개기 설정 시 (3단계, 5단계 등)
+        } else {
+            " | 🤖 쪼개기 X"                 // 쪼개기 안 함 선택 시
+        }
+
         holder.tvTime?.text = "⌛ ${todo.expectedTime}시간 소요$stepsText"
-        holder.tvPriority?.text = "우선순위: ${todo.priority}"
+
+        // ★ [가독성 개선] 우선순위 상/중/하 별 색상 적용
+        holder.tvPriority?.apply {
+            text = "우선순위: ${todo.priority}"
+
+            when (todo.priority) {
+                "상" -> {
+                    setBackgroundColor(Color.parseColor("#FFEBEE")) // 연한 빨강
+                    setTextColor(Color.parseColor("#C62828"))       // 선명한 빨강
+                }
+                "중" -> {
+                    setBackgroundColor(Color.parseColor("#E8EAF6")) // 연한 남색
+                    setTextColor(Color.parseColor("#1A237E"))       // 진한 남색
+                }
+                "하" -> {
+                    setBackgroundColor(Color.parseColor("#F5F5F5")) // 연한 회색
+                    setTextColor(Color.parseColor("#616161"))       // 짙은 회색
+                }
+                else -> {
+                    setBackgroundColor(Color.parseColor("#E8EAF6"))
+                    setTextColor(Color.parseColor("#1A237E"))
+                }
+            }
+        }
 
         if (todo.isCompleted) {
             holder.cardView?.setCardBackgroundColor(Color.parseColor("#E0E0E0"))
@@ -66,7 +95,7 @@ class TodoAdapter(
         // 전체 카드 클릭 -> AI 쪼개기 바텀시트
         holder.itemView.setOnClickListener { onItemClick(todo) }
 
-        // ★ 점 3개 메뉴 선택 시 중간 과정(1번 사진) 없이 바로 해당 화면으로 연결
+        // 점 3개 메뉴 선택 시 수정/삭제 바로 연결
         holder.btnMenu?.setOnClickListener { view ->
             val popup = PopupMenu(view.context, view)
             popup.menu.add(0, 1, 0, "✏️ 수정하기")
@@ -75,11 +104,11 @@ class TodoAdapter(
             popup.setOnMenuItemClickListener { item ->
                 when (item.itemId) {
                     1 -> {
-                        onEditClick(todo) // ✏️ 수정 바텀시트 바로 연결
+                        onEditClick(todo) // ✏️ 수정 바텀시트 연결
                         true
                     }
                     2 -> {
-                        onDeleteClick(todo) // 🗑️ 삭제 확인 다이얼로그(3번 사진) 바로 연결
+                        onDeleteClick(todo) // 🗑️ 삭제 확인 다이얼로그 연결
                         true
                     }
                     else -> false

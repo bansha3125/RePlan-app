@@ -45,6 +45,9 @@ class MainActivity : AppCompatActivity() {
 
     private val completedStepsMap = mutableMapOf<String, MutableSet<Int>>()
 
+    // ★ [백엔드 가이드 반영] 유저가 미루기로 선택한 Task ID 목록 임시 보관
+    private val pendingPostponedTaskIds = mutableSetOf<Long>()
+
     private var currentWeekCalendar: Calendar = Calendar.getInstance(Locale.KOREA).apply {
         firstDayOfWeek = Calendar.MONDAY
         set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
@@ -68,19 +71,18 @@ class MainActivity : AppCompatActivity() {
         updateHeaderWeekRangeText()
         setupDayTabs()
 
-        // ★ [수정] 4개의 파라미터를 정확히 전달하여 1번 중간 다이얼로그 없이 바로 수정/삭제 연결
         val rvTodoList = findViewSafely<RecyclerView>("rvTodoList")
         if (rvTodoList != null) {
             todoAdapter = TodoAdapter(
                 todoList = todoList,
                 onItemClick = { todo ->
-                    showAiDecompositionBottomSheet(todo) // 카드 클릭 시 쪼개기 세부 바텀시트
+                    showAiDecompositionBottomSheet(todo)
                 },
                 onEditClick = { todo ->
-                    showEditTodoBottomSheet(todo) // ✏️ 수정하기 클릭 시 바로 수정 화면
+                    showEditTodoBottomSheet(todo)
                 },
                 onDeleteClick = { todo ->
-                    confirmDeleteTask(todo) // 🗑️ 삭제하기 클릭 시 바로 삭제 확인 다이얼로그
+                    confirmDeleteTask(todo)
                 }
             )
             rvTodoList.adapter = todoAdapter
@@ -93,8 +95,9 @@ class MainActivity : AppCompatActivity() {
         val btnAddFixed = findViewSafely<Button>("btnAddFixed")
         btnAddFixed?.setOnClickListener { showFixedScheduleBottomSheet() }
 
+        // ★ [가이드 반영] AI 재배치 파이프라인 버튼 연결
         val btnAutoSort = findViewSafely<Button>("btnAutoSort")
-        btnAutoSort?.setOnClickListener { startAiReplayPipeline() }
+        btnAutoSort?.setOnClickListener { executeAiReplanPipeline() }
 
         val btnPrevWeek = findViewSafely<View>("btnPrevWeek") ?: findViewSafely<View>("btn_prev")
         val btnNextWeek = findViewSafely<View>("btnNextWeek") ?: findViewSafely<View>("btn_next")
@@ -462,7 +465,6 @@ class MainActivity : AppCompatActivity() {
         return sdf.format(cal.time)
     }
 
-    // 서버 응답 수신 및 디두플리케이션(중복 제거) 로직
     private fun loadWeeklySchedulesFromServer() {
         simulateServerLoading("일정을 불러오는 중입니다...") {
             lifecycleScope.launch {
@@ -480,6 +482,10 @@ class MainActivity : AppCompatActivity() {
 
                     val tasks = ApiClient.service.getTasks()
                     todoList.clear()
+
+                    tasks.forEach { task ->
+                        Log.d("STEP_CHECK", "📌 [할 일]: ${task.title} | useAi: ${task.useAiDecomposition} | 백엔드 desiredSteps: ${task.desiredSteps}")
+                    }
 
                     val processedTaskIds = mutableSetOf<String>()
 
@@ -507,7 +513,15 @@ class MainActivity : AppCompatActivity() {
                                 3 -> "상"; 1 -> "하"; else -> "중"
                             }
 
-                            val steps = if (task.desiredSteps > 0) task.desiredSteps else matchedBlocks.size.coerceAtLeast(1)
+                            // ★ [완벽 해결 로직] 서버의 desiredSteps(3, 5, 7)를 있는 그대로 바인딩
+                            val rawSteps = task.desiredSteps ?: 3
+
+                            val steps = if (task.useAiDecomposition == false || rawSteps == 0) {
+                                0 // 쪼개기 안 함
+                            } else {
+                                rawSteps // 서버에서 온 3, 5, 7단계 수치 100% 반영
+                            }
+
                             val isAllDone = matchedBlocks.isNotEmpty() && matchedBlocks.all { it.completed }
 
                             todoList.add(
@@ -519,14 +533,13 @@ class MainActivity : AppCompatActivity() {
                                     expectedTime = (task.estimatedMinutes / 60).coerceAtLeast(1),
                                     priority = priorityText,
                                     isCompleted = isAllDone,
-                                    desiredSteps = steps,
+                                    desiredSteps = steps, // 어댑터로 정확히 0, 3, 5, 7 수치 전송
                                     subSteps = emptyList()
                                 )
                             )
                         }
                     }
 
-                    // ★ [수정] 어댑터 생성/재생성 시 4개 파라미터 전달하도록 보완 (에러 발생 위치 원천 수정)
                     if (::todoAdapter.isInitialized) {
                         todoAdapter.notifyDataSetChanged()
                     } else {
@@ -551,29 +564,46 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun startAiReplayPipeline() {
+    // ★ [백엔드 가이드 반영] 임시로 모아둔 미루기/완료 태스크 ID를 묶어 POST /schedules/replan 전달
+    private fun executeAiReplanPipeline() {
         val btnAutoSort = findViewSafely<Button>("btnAutoSort")
         btnAutoSort?.isEnabled = false
 
         val tvAiFeedback = findViewSafely<TextView>("tvAiFeedback")
-        tvAiFeedback?.text = "🤖 AI가 일정을 정리하고 있습니다..."
+        tvAiFeedback?.text = "🤖 AI가 일정을 재배치하고 있습니다..."
 
-        simulateServerLoading("AI 일정을 생성하고 있습니다...") {
+        val nowIsoTime = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.KOREA).format(Calendar.getInstance().time)
+        val completedIds = todoList.filter { it.isCompleted }.mapNotNull { it.id.toLongOrNull() }
+        val postponedIds = pendingPostponedTaskIds.toList()
+
+        val replanRequest = ReplanApiRequest(
+            userId = 1L,
+            replanFromTime = nowIsoTime,
+            completedTaskIds = completedIds,
+            postponedTaskIds = postponedIds
+        )
+
+        simulateServerLoading("AI 일정을 재배치 중입니다... 🤖") {
             lifecycleScope.launch {
                 try {
-                    val currentWeekStart = getSelectedWeekStartDate()
-                    val apiResponse = ApiClient.service.generateSchedules(
-                        GenerateScheduleApiRequest(weekStartDate = currentWeekStart)
-                    )
+                    Log.d("REPLAN_DEBUG", "🚀 [POST /schedules/replan] Completed: $completedIds, Postponed: $postponedIds")
 
-                    if (apiResponse.isSuccessful) {
+                    val response = ApiClient.service.replanSchedules(request = replanRequest)
+
+                    if (response.isSuccessful) {
+                        Toast.makeText(this@MainActivity, "일정이 지능적으로 재배치되었습니다! ✨", Toast.LENGTH_SHORT).show()
+
+                        // 전송 성공 시 임시 미루기 데이터 초기화
+                        pendingPostponedTaskIds.clear()
+
+                        // 백엔드가 AI 결과를 DB에 덮어씌웠으므로 주간 스케줄 다시 조회
                         loadWeeklySchedulesFromServer()
                     } else {
-                        Toast.makeText(this@MainActivity, "AI 일정 생성 실패 (서버 오류)", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@MainActivity, "재배치 실패 (${response.code()})", Toast.LENGTH_SHORT).show()
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
-                    Toast.makeText(this@MainActivity, "일정 생성 실패: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "재배치 실패: ${e.message}", Toast.LENGTH_SHORT).show()
                 } finally {
                     btnAutoSort?.isEnabled = true
                 }
@@ -654,9 +684,8 @@ class MainActivity : AppCompatActivity() {
         val totalBlocks = currentGeneratedSchedules.count { it.taskId == gen.taskId }
         val displayTitle = when {
             gen.title.startsWith("[") -> gen.title
-            gen.stepOrder > 0 && totalBlocks > 1 -> "[${gen.stepOrder}/$totalBlocks]\n${gen.title}"
-            gen.stepOrder > 0 -> "[${gen.stepOrder}단계]\n${gen.title}"
-            else -> gen.title
+            gen.stepOrder <= 1 && totalBlocks <= 1 -> "[${gen.title}] ${gen.title}"
+            else -> "[${gen.stepOrder}/$totalBlocks]\n${gen.title}"
         }
 
         val card = CardView(this).apply {
@@ -696,9 +725,14 @@ class MainActivity : AppCompatActivity() {
         recalculateContainerLayout(container)
     }
 
+    // ★ [백엔드 가이드 반영] 클릭 시 즉시 전송이 아닌 임시 목록에 스태킹
     private fun showScheduleActionDialog(gen: GeneratedScheduleDto) {
+        val taskIdLong = gen.taskId
+        val isAlreadyPostponed = taskIdLong != null && pendingPostponedTaskIds.contains(taskIdLong)
+
         val options = arrayOf(
             if (gen.completed) "완료 취소" else "✔ 완료 처리",
+            if (isAlreadyPostponed) "⏩ 미루기 선택 해제" else "⏩ 이 일정 미루기"
         )
 
         AlertDialog.Builder(this)
@@ -706,7 +740,19 @@ class MainActivity : AppCompatActivity() {
             .setItems(options) { _, which ->
                 when (which) {
                     0 -> requestUpdateScheduleStatus(gen, completed = !gen.completed)
-                    1 -> requestUpdateScheduleStatus(gen, locked = !gen.locked)
+                    1 -> {
+                        if (taskIdLong != null) {
+                            if (isAlreadyPostponed) {
+                                pendingPostponedTaskIds.remove(taskIdLong)
+                                Toast.makeText(this, "'${gen.title}' 미루기 선택 해제", Toast.LENGTH_SHORT).show()
+                            } else {
+                                pendingPostponedTaskIds.add(taskIdLong)
+                                Toast.makeText(this, "'${gen.title}' 미루기 목록에 추가됨 ⏩\n'AI 재배치' 버튼을 누르면 일정이 반영됩니다.", Toast.LENGTH_SHORT).show()
+                            }
+                        } else {
+                            Toast.makeText(this, "유효하지 않은 일정 ID입니다.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
                 }
             }
             .setNegativeButton("취소", null)
@@ -862,18 +908,30 @@ class MainActivity : AppCompatActivity() {
 
         btnRegisterTodo?.setOnClickListener {
             val todoName = etTodoName?.text?.toString()?.trim() ?: ""
-            val expectedTimeStr = etExpectedTime?.text?.toString() ?: ""
+            val expectedTimeStr = etExpectedTime?.text?.toString()?.trim() ?: ""
 
             if (todoName.isEmpty()) {
                 Toast.makeText(this, "할 일 이름을 입력해 주세요!", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
 
-            val expectedMinutes = if (expectedTimeStr.isEmpty()) 120 else expectedTimeStr.toInt() * 60
+            // 소요 시간 예외 처리 (기본 2시간 = 120분)
+            val expectedMinutes = try {
+                if (expectedTimeStr.isEmpty()) 120 else expectedTimeStr.toInt() * 60
+            } catch (e: Exception) {
+                120
+            }
+
+            // 백엔드 파싱 에러 방지용 마감일 안전 추출 (YYYY-MM-DD)
+            val safeDeadlineDate = try {
+                getSelectedWeekSundayDeadline()
+            } catch (e: Exception) {
+                getSelectedWeekStartDate()
+            }
 
             val apiRequest = CreateTaskApiRequest(
                 title = todoName,
-                deadline = getSelectedWeekSundayDeadline(),
+                deadline = safeDeadlineDate,
                 estimatedMinutes = expectedMinutes,
                 priority = selectedPriorityInt,
                 useAiDecomposition = (desiredSteps > 0),
@@ -882,6 +940,8 @@ class MainActivity : AppCompatActivity() {
                 linkedScheduleId = null
             )
 
+            Log.d("SEND_CHECK", "📤 백엔드 등록 시도 [JSON 데이터]: $apiRequest")
+
             bottomSheetDialog.dismiss()
 
             simulateServerLoading("할 일을 등록하는 중입니다...") {
@@ -889,14 +949,19 @@ class MainActivity : AppCompatActivity() {
                     try {
                         val response = ApiClient.service.createTask(request = apiRequest)
                         if (response.isSuccessful) {
+                            Log.d("SEND_CHECK", "✅ 백엔드 저장 성공: ${response.body()}")
                             Toast.makeText(this@MainActivity, "'${apiRequest.title}' 등록 완료!", Toast.LENGTH_SHORT).show()
                             loadWeeklySchedulesFromServer()
                         } else {
-                            Toast.makeText(this@MainActivity, "저장 실패 (${response.code()})", Toast.LENGTH_SHORT).show()
+                            // 500 등 에러 발생 시 백엔드가 던진 상세 메세지 출력
+                            val errorBodyStr = response.errorBody()?.string() ?: "알 수 없는 백엔드 에러"
+                            Log.e("SEND_CHECK", "❌ 저장 실패 코드: ${response.code()} | 백엔드 에러 내용: $errorBodyStr")
+                            Toast.makeText(this@MainActivity, "저장 실패 (코드 ${response.code()}) - 백엔드 로그 확인", Toast.LENGTH_LONG).show()
                         }
                     } catch (e: Exception) {
                         e.printStackTrace()
-                        Toast.makeText(this@MainActivity, "저장 중 오류 발생: ${e.message}", Toast.LENGTH_SHORT).show()
+                        Log.e("SEND_CHECK", "💥 네트워크 통신 예외 발생: ${e.message}")
+                        Toast.makeText(this@MainActivity, "통신 에러: ${e.message}", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -1200,10 +1265,14 @@ class MainActivity : AppCompatActivity() {
             isTaskIdMatch || isTitleMatch
         }.sortedBy { it.stepOrder }
 
-        val stepsCount = if (matchedSchedules.isNotEmpty()) matchedSchedules.size else if (todo.desiredSteps > 0) todo.desiredSteps else 3
+        val isNotDecomposed = todo.desiredSteps == 0
 
         val tvSubTitle = TextView(this).apply {
-            text = "🤖 RePlan AI 추천 계획\n[${todo.name}] (${completedSteps.size}/${stepsCount}단계 완료)"
+            text = if (isNotDecomposed) {
+                "📝 단일 작업 계획\n[${todo.name}] (${if (todo.isCompleted) 1 else 0}/1단계 완료)"
+            } else {
+                "🤖 RePlan AI 추천 계획\n[${todo.name}] (${completedSteps.size}/${todo.desiredSteps}단계 완료)"
+            }
             textSize = 14f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor("#1A237E"))
@@ -1211,10 +1280,20 @@ class MainActivity : AppCompatActivity() {
         }
         rootLayout.addView(tvSubTitle)
 
-        val actualStepsList = if (matchedSchedules.isNotEmpty()) {
-            matchedSchedules.map { it.title }
+// showAiDecompositionBottomSheet() 내부
+
+        val actualStepsList = if (isNotDecomposed) {
+            listOf("1단계: [${todo.name}] ${todo.name}")
+        } else if (matchedSchedules.isNotEmpty()) {
+            matchedSchedules.mapIndexed { index, gen ->
+                // 백엔드에서 넘어온 제목에서 기존 [태그] 제거 후 순수 텍스트만 추출
+                val cleanTitle = gen.title.replace(Regex("\\[.*?\\]"), "").trim()
+
+                // "N단계: [할 일 이름] 세부 내용" 포맷으로 조립
+                "${index + 1}단계: [${todo.name}] $cleanTitle"
+            }
         } else {
-            List(stepsCount) { index -> "${index + 1}단계: [${todo.name}] AI 추천 실행" }
+            List(todo.desiredSteps) { index -> "${index + 1}단계: [${todo.name}] ${todo.name}" }
         }
 
         actualStepsList.forEachIndexed { index, stepText ->
@@ -1224,7 +1303,7 @@ class MainActivity : AppCompatActivity() {
                 setPadding(dpToPx(4), dpToPx(8), dpToPx(4), dpToPx(8))
 
                 val targetBlock = matchedSchedules.getOrNull(index)
-                val isInitiallyChecked = targetBlock?.completed == true || completedSteps.contains(index)
+                val isInitiallyChecked = todo.isCompleted || targetBlock?.completed == true || completedSteps.contains(index)
 
                 if (isInitiallyChecked) {
                     completedSteps.add(index)
@@ -1264,12 +1343,22 @@ class MainActivity : AppCompatActivity() {
                         requestUpdateScheduleStatus(gen = gen, completed = checked)
                     }
 
-                    tvSubTitle.text = "🤖 RePlan AI 추천 계획\n[${todo.name}] (${completedSteps.size}/${actualStepsList.size}단계 완료)"
+                    tvSubTitle.text = if (isNotDecomposed) {
+                        "📝 단일 작업 계획\n[${todo.name}] (${if (checked) 1 else 0}/1단계 완료)"
+                    } else {
+                        "🤖 RePlan AI 추천 계획\n[${todo.name}] (${completedSteps.size}/${actualStepsList.size}단계 완료)"
+                    }
 
-                    val isAllDone = (completedSteps.size == actualStepsList.size) || (matchedSchedules.isNotEmpty() && matchedSchedules.all { it.completed })
+                    val isAllDone = if (isNotDecomposed) checked else (completedSteps.size == actualStepsList.size)
 
                     val actualTodoInList = todoList.find { it.id == todo.id || it.name == todo.name } ?: todo
                     actualTodoInList.isCompleted = isAllDone
+
+                    if (isAllDone) {
+                        updateTodoCardCompletion(actualTodoInList, isAllCompleted = true)
+                    } else {
+                        updateTodoCardUncompletion(actualTodoInList)
+                    }
 
                     if (::todoAdapter.isInitialized) {
                         todoAdapter.notifyDataSetChanged()

@@ -87,13 +87,15 @@ data class UpdateScheduleStatusApiRequest(
 )
 
 // 할 일 조회 응답 DTO
+// 할 일 조회 응답 DTO
+// TaskResponse (할 일 조회 DTO) 수정
 data class TaskResponse(
     @SerializedName("taskId") val taskId: Long? = null,
     @SerializedName("title") val title: String = "",
     @SerializedName("deadline") val deadline: String? = null,
     @SerializedName("estimatedMinutes") val estimatedMinutes: Int = 120,
-    @SerializedName("useAiDecomposition") val useAiDecomposition: Boolean = false,
-    @SerializedName("desiredSteps") val desiredSteps: Int = 0,
+    @SerializedName("useAiDecomposition") val useAiDecomposition: Boolean? = true, // ★ null 대응 기본값 true
+    @SerializedName("desiredSteps") val desiredSteps: Int? = 3,                    // ★ null 대응 기본값 3
     @SerializedName("priority") val priority: Int = 2,
     @SerializedName("difficulty") val difficulty: Int = 3,
     @SerializedName("focusRequired") val focusRequired: Int = 3,
