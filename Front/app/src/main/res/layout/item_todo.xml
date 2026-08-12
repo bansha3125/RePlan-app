@@ -47,20 +47,20 @@
                 android:paddingHorizontal="8dp"
                 android:paddingVertical="4dp"/>
 
-            <!-- 오른쪽 끝 세로 점 세 개 (⋮) 버튼 -->
+            <!-- 오른쪽 끝 세로 점 세 개 (⋮) 버튼 (터치 포커스 및 ID 최적화) -->
             <TextView
                 android:id="@+id/tvMenu"
-                android:layout_width="28dp"
-                android:layout_height="28dp"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
                 android:layout_marginStart="4dp"
                 android:text="⋮"
                 android:textColor="#757575"
-                android:textSize="18sp"
+                android:textSize="20sp"
                 android:textStyle="bold"
                 android:gravity="center"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:clickable="true"
-                android:focusable="true"/>
+                android:focusable="false"/>
         </LinearLayout>
 
         <!-- 하단: 예상 소요 시간 및 AI 단계 뱃지 영역 -->

@@ -6,58 +6,87 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
+import androidx.appcompat.widget.PopupMenu
 import androidx.cardview.widget.CardView
 import androidx.recyclerview.widget.RecyclerView
 
 class TodoAdapter(
     private val todoList: List<Todo>,
     private val onItemClick: (Todo) -> Unit,
-    private val onMenuClick: (Todo) -> Unit
+    private val onEditClick: (Todo) -> Unit,   // ★ 수정 클릭 전용 콜백
+    private val onDeleteClick: (Todo) -> Unit  // ★ 삭제 클릭 전용 콜백
 ) : RecyclerView.Adapter<TodoAdapter.TodoViewHolder>() {
 
     class TodoViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-        val cardView: CardView = itemView as CardView
-        val tvName: TextView = itemView.findViewById(R.id.tvTodoItemName)
-        val tvPriority: TextView = itemView.findViewById(R.id.tvTodoItemPriority)
-        val tvTime: TextView = itemView.findViewById(R.id.tvTodoItemTime)
-        val tvAiSteps: TextView = itemView.findViewById(R.id.tvTodoItemAiSteps)
-        val btnMenu: TextView = itemView.findViewById(R.id.tvMenu)
+        val cardView: CardView? = itemView as? CardView
+        private val context = itemView.context
+        private val resources = context.resources
+        private val packageName = context.packageName
+
+        private fun <T : View> findView(idName: String): T? {
+            val id = resources.getIdentifier(idName, "id", packageName)
+            return if (id != 0) itemView.findViewById(id) else null
+        }
+
+        val tvName: TextView? = findView("tvTodoItemName") ?: findView("tvTodoName")
+        val tvTime: TextView? = findView("tvTodoItemTime") ?: findView("tvExpectedTime")
+        val tvPriority: TextView? = findView("tvTodoItemPriority") ?: findView("tvPriority")
+        val btnMenu: View? = findView("tvMenu") ?: findView("btnMenu")
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): TodoViewHolder {
-        val view = LayoutInflater.from(parent.context)
-            .inflate(R.layout.item_todo, parent, false)
+        val layoutId = parent.context.resources.getIdentifier("item_todo", "layout", parent.context.packageName)
+        val view = LayoutInflater.from(parent.context).inflate(layoutId, parent, false)
         return TodoViewHolder(view)
     }
 
     override fun onBindViewHolder(holder: TodoViewHolder, position: Int) {
         val todo = todoList[position]
 
-        holder.tvName.text = todo.name
-        holder.tvPriority.text = "우선순위: ${todo.priority}"
-        holder.tvTime.text = "⏳ ${todo.expectedTime}시간 소요"
+        holder.tvName?.text = todo.name
 
-        // AI 쪼개기 설정 여부에 따른 뱃지 노출
-        if (todo.desiredSteps > 0) {
-            holder.tvAiSteps.visibility = View.VISIBLE
-            holder.tvAiSteps.text = "🤖 AI ${todo.desiredSteps}단계 작업 분해 요청됨"
-        } else {
-            holder.tvAiSteps.visibility = View.GONE
-        }
+        val stepsText = if (todo.desiredSteps > 0) " | 🤖 ${todo.desiredSteps}단계" else ""
+        holder.tvTime?.text = "⌛ ${todo.expectedTime}시간 소요$stepsText"
+        holder.tvPriority?.text = "우선순위: ${todo.priority}"
 
-        // 완료 처리 상태에 따른 회색 스타일 및 취소선 적용
         if (todo.isCompleted) {
-            holder.cardView.setCardBackgroundColor(Color.parseColor("#F5F5F5"))
-            holder.tvName.paintFlags = holder.tvName.paintFlags or Paint.STRIKE_THRU_TEXT_FLAG
-            holder.tvName.setTextColor(Color.parseColor("#888888"))
+            holder.cardView?.setCardBackgroundColor(Color.parseColor("#E0E0E0"))
+            holder.tvName?.apply {
+                paintFlags = paintFlags or Paint.STRIKE_THRU_TEXT_FLAG
+                setTextColor(Color.parseColor("#757575"))
+            }
         } else {
-            holder.cardView.setCardBackgroundColor(Color.WHITE)
-            holder.tvName.paintFlags = holder.tvName.paintFlags and Paint.STRIKE_THRU_TEXT_FLAG.inv()
-            holder.tvName.setTextColor(Color.parseColor("#333333"))
+            holder.cardView?.setCardBackgroundColor(Color.WHITE)
+            holder.tvName?.apply {
+                paintFlags = paintFlags and Paint.STRIKE_THRU_TEXT_FLAG.inv()
+                setTextColor(Color.parseColor("#212121"))
+            }
         }
 
+        // 전체 카드 클릭 -> AI 쪼개기 바텀시트
         holder.itemView.setOnClickListener { onItemClick(todo) }
-        holder.btnMenu.setOnClickListener { onMenuClick(todo) }
+
+        // ★ 점 3개 메뉴 선택 시 중간 과정(1번 사진) 없이 바로 해당 화면으로 연결
+        holder.btnMenu?.setOnClickListener { view ->
+            val popup = PopupMenu(view.context, view)
+            popup.menu.add(0, 1, 0, "✏️ 수정하기")
+            popup.menu.add(0, 2, 1, "🗑️ 삭제하기")
+
+            popup.setOnMenuItemClickListener { item ->
+                when (item.itemId) {
+                    1 -> {
+                        onEditClick(todo) // ✏️ 수정 바텀시트 바로 연결
+                        true
+                    }
+                    2 -> {
+                        onDeleteClick(todo) // 🗑️ 삭제 확인 다이얼로그(3번 사진) 바로 연결
+                        true
+                    }
+                    else -> false
+                }
+            }
+            popup.show()
+        }
     }
 
     override fun getItemCount(): Int = todoList.size

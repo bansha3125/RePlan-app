@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:background="#FFFFFF"> <!-- ★ android:background 로 수정 -->
+
+    <!-- RePlan 로고 아이콘 -->
+    <ImageView
+        android:id="@+id/ivLogo"
+        android:layout_width="120dp"
+        android:layout_height="120dp"
+        android:src="@android:drawable/ic_menu_today"
+        android:contentDescription="RePlan Logo" />
+
+    <!-- 앱 이름 -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="RePlan"
+        android:textSize="28sp"
+        android:textStyle="bold"
+        android:textColor="#1A237E"
+        android:layout_marginTop="16dp" />
+
+    <!-- 서비스 한 줄 설명 -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="AI 기반 똑똑한 일정 재배치"
+        android:textSize="14sp"
+        android:textColor="#757575"
+        android:layout_marginTop="6dp" />
+
+    <!-- 하단 로딩 인디케이터 -->
+    <ProgressBar
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:layout_marginTop="40dp" />
+
+</LinearLayout>

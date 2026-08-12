@@ -40,6 +40,7 @@ data class GeneratedScheduleDto(
 
 // 일반 할 일 추가 (POST /schedules/tasks)
 data class CreateTaskApiRequest(
+    @SerializedName("userId") val userId: Long = 1L, // ★ 백엔드 필수 필드 추가
     @SerializedName("title") val title: String,
     @SerializedName("deadline") val deadline: String? = null,
     @SerializedName("estimatedMinutes") val estimatedMinutes: Int,
@@ -52,6 +53,7 @@ data class CreateTaskApiRequest(
 
 // 고정 일정 추가 (POST /schedules/fixed-schedules)
 data class CreateFixedScheduleApiRequest(
+    @SerializedName("userId") val userId: Long = 1L, // ★ 백엔드 필수 필드 추가
     @SerializedName("title") val title: String,
     @SerializedName("startTime") val startTime: String,
     @SerializedName("endTime") val endTime: String,
@@ -61,11 +63,13 @@ data class CreateFixedScheduleApiRequest(
 
 // AI 스케줄 생성 요청 (POST /schedules/generate)
 data class GenerateScheduleApiRequest(
+    @SerializedName("userId") val userId: Long = 1L, // ★ 백엔드 필수 필드 추가
     @SerializedName("weekStartDate") val weekStartDate: String? = null
 )
 
 // AI 스케줄 재배치 요청 (POST /schedules/replan)
 data class ReplanApiRequest(
+    @SerializedName("userId") val userId: Long = 1L, // ★ 백엔드 필수 필드 추가
     @SerializedName("replanFromTime") val replanFromTime: String,
     @SerializedName("completedTaskIds") val completedTaskIds: List<Long> = emptyList(),
     @SerializedName("postponedTaskIds") val postponedTaskIds: List<Long> = emptyList()
@@ -73,6 +77,7 @@ data class ReplanApiRequest(
 
 // 일정 상태 및 위치 변경 (PATCH /schedules/blocks/{blockId})
 data class UpdateScheduleStatusApiRequest(
+    @SerializedName("userId") val userId: Long = 1L, // ★ 백엔드 필수 필드 추가
     @SerializedName("taskId") val taskId: Long? = null,
     @SerializedName("blockId") val blockId: String? = null,
     @SerializedName("locked") val locked: Boolean? = null,
@@ -81,7 +86,7 @@ data class UpdateScheduleStatusApiRequest(
     @SerializedName("endTime") val endTime: String? = null
 )
 
-// ★ [수정] 할 일 조회 응답 DTO (deadlineType 및 linkedScheduleId 연동 추가)
+// 할 일 조회 응답 DTO
 data class TaskResponse(
     @SerializedName("taskId") val taskId: Long? = null,
     @SerializedName("title") val title: String = "",

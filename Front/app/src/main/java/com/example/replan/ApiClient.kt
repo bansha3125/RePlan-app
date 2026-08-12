@@ -20,11 +20,12 @@ import java.util.concurrent.TimeUnit
 interface ScheduleApiService {
 
     /**
-     * 1. 주간 일정 조회 (GET /schedules/weekly?weekStartDate=2026-08-11)
+     * 1. 주간 일정 조회 (GET /schedules/weekly?userId=1&weekStartDate=2026-08-11)
      */
     @GET("schedules/weekly")
     suspend fun getWeeklySchedules(
-        @Query("weekStartDate") weekStartDate: String? = null
+        @Query("userId") userId: Long = 1L,
+        @Query("weekStartDate") weekStartDate: String
     ): WeeklyScheduleResponse
 
     /**
@@ -61,13 +62,13 @@ interface ScheduleApiService {
     ): Response<ResponseBody>
 
     /**
-     * 등록된 할 일 목록 조회 API (GET /schedules/tasks)
+     * 6. 등록된 할 일 목록 조회 API (GET /schedules/tasks)
      */
     @GET("schedules/tasks")
     suspend fun getTasks(): List<TaskResponse>
 
     /**
-     * AI 일정 재배치 API (POST /schedules/replan)
+     * 7. AI 일정 재배치 API (POST /schedules/replan)
      */
     @POST("schedules/replan")
     suspend fun replanSchedules(
@@ -75,7 +76,7 @@ interface ScheduleApiService {
     ): Response<ResponseBody>
 
     /**
-     * 할 일 수정 API (PATCH /schedules/tasks/{taskId})
+     * 8. 할 일 수정 API (PATCH /schedules/tasks/{taskId})
      */
     @PATCH("schedules/tasks/{taskId}")
     suspend fun updateTask(
@@ -84,7 +85,7 @@ interface ScheduleApiService {
     ): Response<ResponseBody>
 
     /**
-     * 할 일 삭제 API (DELETE /schedules/tasks/{taskId})
+     * 9. 할 일 삭제 API (DELETE /schedules/tasks/{taskId})
      */
     @DELETE("schedules/tasks/{taskId}")
     suspend fun deleteTask(
@@ -92,8 +93,7 @@ interface ScheduleApiService {
     ): Response<ResponseBody>
 
     /**
-     * Task 완료 상태 변경 API
-     * (PATCH /schedules/tasks/{taskId}/complete) -> Body: {"completed": true}
+     * 10. Task 완료 상태 변경 API (PATCH /schedules/tasks/{taskId}/complete)
      */
     @PATCH("schedules/tasks/{taskId}/complete")
     suspend fun updateTaskStatus(
@@ -102,7 +102,7 @@ interface ScheduleApiService {
     ): Response<ResponseBody>
 
     /**
-     * 고정 일정 목록 조회 API (GET /schedules/fixed-schedules)
+     * 11. 고정 일정 목록 조회 API (GET /schedules/fixed-schedules)
      */
     @GET("schedules/fixed-schedules")
     suspend fun getFixedSchedules(): List<FixedScheduleDto>

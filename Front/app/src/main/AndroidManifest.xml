@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- 🌐 백엔드 API 통신을 위한 인터넷 권한 추가 -->
+    <!-- 🌐 백엔드 API 통신을 위한 인터넷 권한 -->
     <uses-permission android:name="android.permission.INTERNET" />
 
     <application
@@ -14,22 +14,23 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.RePlan"
-        android:usesCleartextTraffic="true"> <!-- 💡 에뮬레이터/로컬 HTTP 통신 허용 -->
+        android:usesCleartextTraffic="true"> <!-- 💡 로컬 HTTP 및 ngrok 통신 허용 -->
 
-        <!-- 1. 로그인 액티비티를 첫 화면(LAUNCHER)으로 설정 -->
+        <!-- 1. 스플래시 액티비티를 첫 실행 화면(LAUNCHER)으로 설정 -->
         <activity
-            android:name=".LoginActivity"
-            android:exported="true">
+            android:name=".SplashActivity"
+            android:exported="true"
+            android:theme="@style/Theme.RePlan">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
-        <!-- 2. 메인 액티비티는 일반 화면으로 설정 -->
+        <!-- 2. 메인 홈 화면 -->
         <activity
             android:name=".MainActivity"
-            android:exported="true" />
+            android:exported="false" />
 
     </application>
 

@@ -28,6 +28,7 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
+import java.util.UUID
 
 class MainActivity : AppCompatActivity() {
 
@@ -44,7 +45,6 @@ class MainActivity : AppCompatActivity() {
 
     private val completedStepsMap = mutableMapOf<String, MutableSet<Int>>()
 
-    // 현재 선택된 주간 (월요일 기준)
     private var currentWeekCalendar: Calendar = Calendar.getInstance(Locale.KOREA).apply {
         firstDayOfWeek = Calendar.MONDAY
         set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
@@ -68,15 +68,19 @@ class MainActivity : AppCompatActivity() {
         updateHeaderWeekRangeText()
         setupDayTabs()
 
+        // ★ [수정] 4개의 파라미터를 정확히 전달하여 1번 중간 다이얼로그 없이 바로 수정/삭제 연결
         val rvTodoList = findViewSafely<RecyclerView>("rvTodoList")
         if (rvTodoList != null) {
             todoAdapter = TodoAdapter(
                 todoList = todoList,
                 onItemClick = { todo ->
-                    showAiDecompositionBottomSheet(todo)
+                    showAiDecompositionBottomSheet(todo) // 카드 클릭 시 쪼개기 세부 바텀시트
                 },
-                onMenuClick = { todo ->
-                    showEditOrDeleteTaskDialog(todo)
+                onEditClick = { todo ->
+                    showEditTodoBottomSheet(todo) // ✏️ 수정하기 클릭 시 바로 수정 화면
+                },
+                onDeleteClick = { todo ->
+                    confirmDeleteTask(todo) // 🗑️ 삭제하기 클릭 시 바로 삭제 확인 다이얼로그
                 }
             )
             rvTodoList.adapter = todoAdapter
@@ -108,21 +112,6 @@ class MainActivity : AppCompatActivity() {
         return if (id != 0) findViewById(id) else null
     }
 
-    private fun showEditOrDeleteTaskDialog(todo: Todo) {
-        val options = arrayOf("✏️ 할 일 수정", "🗑️ 할 일 삭제")
-
-        AlertDialog.Builder(this)
-            .setTitle(todo.name)
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> showEditTodoBottomSheet(todo)
-                    1 -> confirmDeleteTask(todo)
-                }
-            }
-            .setNegativeButton("취소", null)
-            .show()
-    }
-
     private fun confirmDeleteTask(todo: Todo) {
         AlertDialog.Builder(this)
             .setTitle("할 일 삭제")
@@ -135,7 +124,7 @@ class MainActivity : AppCompatActivity() {
                         try {
                             val response = ApiClient.service.deleteTask(taskId = taskIdLong)
                             if (response.isSuccessful) {
-                                todoList.remove(todo)
+                                todoList.removeAll { it.id == todo.id }
                                 if (::todoAdapter.isInitialized) todoAdapter.notifyDataSetChanged()
 
                                 Toast.makeText(this@MainActivity, "'${todo.name}' 삭제 완료!", Toast.LENGTH_SHORT).show()
@@ -409,7 +398,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun scrollToMorningEight() {
         val rootView = findViewById<View>(android.R.id.content) ?: return
-
         var targetScrollView: View? = null
 
         fun findScrollViewRecursive(view: View) {
@@ -426,16 +414,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         findScrollViewRecursive(rootView)
-
         val targetY = dpToPx((480 * MINUTE_FACTOR).toInt())
 
         handler.postDelayed({
             targetScrollView?.let { sv ->
-                if (sv is ScrollView) {
-                    sv.smoothScrollTo(0, targetY)
-                } else if (sv is NestedScrollView) {
-                    sv.smoothScrollTo(0, targetY)
-                }
+                if (sv is ScrollView) sv.smoothScrollTo(0, targetY)
+                else if (sv is NestedScrollView) sv.smoothScrollTo(0, targetY)
             }
         }, 200)
     }
@@ -478,57 +462,61 @@ class MainActivity : AppCompatActivity() {
         return sdf.format(cal.time)
     }
 
+    // 서버 응답 수신 및 디두플리케이션(중복 제거) 로직
     private fun loadWeeklySchedulesFromServer() {
         simulateServerLoading("일정을 불러오는 중입니다...") {
             lifecycleScope.launch {
                 try {
                     val targetWeek = getSelectedWeekStartDate()
+                    val currentUserId = 1L
 
-                    Log.d("REPLAN_DEBUG", "🚀 [조회 요청 전송] weekStartDate: $targetWeek")
+                    val response: WeeklyScheduleResponse = ApiClient.service.getWeeklySchedules(
+                        userId = currentUserId,
+                        weekStartDate = targetWeek
+                    )
 
-                    val response = ApiClient.service.getWeeklySchedules(weekStartDate = targetWeek)
-
-                    currentFixedSchedules = response.fixedSchedules
-                    currentGeneratedSchedules = response.generatedSchedules
-
-                    Log.d("REPLAN_DEBUG", "✅ [수신 성공] 고정 일정: ${currentFixedSchedules.size}개, AI 일정: ${currentGeneratedSchedules.size}개")
+                    currentFixedSchedules = response.fixedSchedules ?: emptyList()
+                    currentGeneratedSchedules = response.generatedSchedules ?: emptyList()
 
                     val tasks = ApiClient.service.getTasks()
-
                     todoList.clear()
+
+                    val processedTaskIds = mutableSetOf<String>()
+
                     if (tasks.isNotEmpty()) {
                         tasks.forEach { task ->
-                            val priorityText = when (task.priority) {
-                                3 -> "상"; 2 -> "중"; 1 -> "하"; else -> "중"
-                            }
+                            val currentTaskIdStr = task.taskId?.toString() ?: UUID.randomUUID().toString()
 
-                            val matchedBlocks = response.generatedSchedules.filter { gen ->
+                            if (processedTaskIds.contains(currentTaskIdStr)) {
+                                return@forEach
+                            }
+                            processedTaskIds.add(currentTaskIdStr)
+
+                            val cleanTaskTitle = task.title.trim().replace(" ", "").lowercase(Locale.KOREA)
+
+                            val matchedBlocks = currentGeneratedSchedules.filter { gen ->
                                 val isTaskIdMatch = task.taskId != null && gen.taskId == task.taskId
-                                val cleanTaskTitle = task.title.trim().replace(" ", "").lowercase(Locale.KOREA)
-                                val cleanGenTitle = gen.title.trim().replace(" ", "").lowercase(Locale.KOREA)
+                                val cleanGenTitle = gen.title.replace(Regex("\\[.*?\\]"), "").trim().replace(" ", "").lowercase(Locale.KOREA)
                                 val isTitleMatch = cleanTaskTitle.isNotEmpty() && (
                                         cleanGenTitle.contains(cleanTaskTitle) || cleanTaskTitle.contains(cleanGenTitle)
                                         )
                                 isTaskIdMatch || isTitleMatch
                             }
 
-                            val steps = if (task.desiredSteps > 0) task.desiredSteps else if (matchedBlocks.isNotEmpty()) matchedBlocks.size else 3
-                            val isAllDone = matchedBlocks.isNotEmpty() && matchedBlocks.all { it.completed }
-
-                            // completedStepsMap 동기화
-                            val stepSet = completedStepsMap.getOrPut(task.taskId?.toString() ?: task.title) { mutableSetOf() }
-                            stepSet.clear()
-                            matchedBlocks.forEachIndexed { idx, gen ->
-                                if (gen.completed) stepSet.add(idx)
+                            val priorityText = when (task.priority) {
+                                3 -> "상"; 1 -> "하"; else -> "중"
                             }
+
+                            val steps = if (task.desiredSteps > 0) task.desiredSteps else matchedBlocks.size.coerceAtLeast(1)
+                            val isAllDone = matchedBlocks.isNotEmpty() && matchedBlocks.all { it.completed }
 
                             todoList.add(
                                 Todo(
-                                    id = task.taskId?.toString() ?: java.util.UUID.randomUUID().toString(),
+                                    id = currentTaskIdStr,
                                     name = task.title,
                                     deadlineType = task.deadlineType ?: "DATE",
                                     specificScheduleName = null,
-                                    expectedTime = task.estimatedMinutes / 60,
+                                    expectedTime = (task.estimatedMinutes / 60).coerceAtLeast(1),
                                     priority = priorityText,
                                     isCompleted = isAllDone,
                                     desiredSteps = steps,
@@ -538,19 +526,25 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
 
-                    if (::todoAdapter.isInitialized) todoAdapter.notifyDataSetChanged()
+                    // ★ [수정] 어댑터 생성/재생성 시 4개 파라미터 전달하도록 보완 (에러 발생 위치 원천 수정)
+                    if (::todoAdapter.isInitialized) {
+                        todoAdapter.notifyDataSetChanged()
+                    } else {
+                        val rvTodoList = findViewById<RecyclerView>(R.id.rvTodoList)
+                        todoAdapter = TodoAdapter(
+                            todoList = todoList,
+                            onItemClick = { showAiDecompositionBottomSheet(it) },
+                            onEditClick = { showEditTodoBottomSheet(it) },
+                            onDeleteClick = { confirmDeleteTask(it) }
+                        )
+                        rvTodoList?.adapter = todoAdapter
+                    }
 
                     renderAllWeeklySchedules()
-
                     Toast.makeText(this@MainActivity, "일정을 불러왔습니다! ✨", Toast.LENGTH_SHORT).show()
 
-                } catch (e: retrofit2.HttpException) {
-                    val errorJson = e.response()?.errorBody()?.string()
-                    Log.e("REPLAN_DEBUG", "❌ [HTTP ${e.code()} 에러 상세]: $errorJson")
-                    Toast.makeText(this@MainActivity, "서버 오류: $errorJson", Toast.LENGTH_LONG).show()
                 } catch (e: Exception) {
                     e.printStackTrace()
-                    Log.e("REPLAN_DEBUG", "💥 [일정 불러오기 예외]: ${e.message}")
                     Toast.makeText(this@MainActivity, "일정 조회 실패: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
@@ -568,11 +562,8 @@ class MainActivity : AppCompatActivity() {
             lifecycleScope.launch {
                 try {
                     val currentWeekStart = getSelectedWeekStartDate()
-
                     val apiResponse = ApiClient.service.generateSchedules(
-                        GenerateScheduleApiRequest(
-                            weekStartDate = currentWeekStart
-                        )
+                        GenerateScheduleApiRequest(weekStartDate = currentWeekStart)
                     )
 
                     if (apiResponse.isSuccessful) {
@@ -587,27 +578,6 @@ class MainActivity : AppCompatActivity() {
                     btnAutoSort?.isEnabled = true
                 }
             }
-        }
-    }
-
-    private fun handleGeneratedSchedulesResponse(response: WeeklyScheduleResponse) {
-        val tvAiFeedback = findViewSafely<TextView>("tvAiFeedback")
-
-        renderAllWeeklySchedules()
-
-        replayChanges = parseGeneratedSchedulesToChanges(response.generatedSchedules)
-
-        val layoutReplayControl = findViewSafely<LinearLayout>("layoutReplayControl")
-        layoutReplayControl?.visibility = View.VISIBLE
-
-        stopAutoPlay()
-        currentStepIndex = response.generatedSchedules.size - 1
-
-        if (response.generatedSchedules.isNotEmpty()) {
-            tvAiFeedback?.text = "🤖 AI가 ${response.generatedSchedules.size}개의 세부 일정 배치를 완료했습니다!"
-            Toast.makeText(this@MainActivity, "AI 일정 자동 정렬 완료! ✨", Toast.LENGTH_SHORT).show()
-        } else {
-            tvAiFeedback?.text = "🤖 정리할 AI 일정을 찾을 수 없습니다."
         }
     }
 
@@ -715,7 +685,6 @@ class MainActivity : AppCompatActivity() {
             textSize = 9.5f
             gravity = Gravity.CENTER
             setPadding(dpToPx(2), dpToPx(2), dpToPx(2), dpToPx(2))
-
             maxLines = 3
             ellipsize = TextUtils.TruncateAt.END
         }
@@ -730,7 +699,6 @@ class MainActivity : AppCompatActivity() {
     private fun showScheduleActionDialog(gen: GeneratedScheduleDto) {
         val options = arrayOf(
             if (gen.completed) "완료 취소" else "✔ 완료 처리",
-            if (gen.locked) "고정 해제" else "🔒 일정 고정"
         )
 
         AlertDialog.Builder(this)
@@ -745,7 +713,6 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    // ★ [핵심 FIX] 시간표 클릭 시 완료 상태 및 completedStepsMap 완벽 동기화
     private fun requestUpdateScheduleStatus(
         gen: GeneratedScheduleDto,
         locked: Boolean? = null,
@@ -822,18 +789,10 @@ class MainActivity : AppCompatActivity() {
                         endTime = updatedGen.endTime
                     )
 
-                    Log.d("REPLAN_DEBUG", "🚀 [PATCH 요청 전송] blockId: $blockId | completed: $completed")
-
-                    val response = ApiClient.service.updateGeneratedScheduleStatus(
+                    ApiClient.service.updateGeneratedScheduleStatus(
                         blockId = blockId,
                         request = updateBody
                     )
-
-                    if (response.isSuccessful) {
-                        Log.d("REPLAN_DEBUG", "✅ [PATCH 성공] 상태 변경 완료")
-                    } else {
-                        Log.e("REPLAN_DEBUG", "❌ [PATCH 실패] 코드: ${response.code()}, error: ${response.errorBody()?.string()}")
-                    }
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
@@ -933,13 +892,10 @@ class MainActivity : AppCompatActivity() {
                             Toast.makeText(this@MainActivity, "'${apiRequest.title}' 등록 완료!", Toast.LENGTH_SHORT).show()
                             loadWeeklySchedulesFromServer()
                         } else {
-                            val errorBody = response.errorBody()?.string()
-                            Log.e("REPLAN_DEBUG", "❌ [Task 생성 실패] Code: ${response.code()}, Error: $errorBody")
                             Toast.makeText(this@MainActivity, "저장 실패 (${response.code()})", Toast.LENGTH_SHORT).show()
                         }
                     } catch (e: Exception) {
                         e.printStackTrace()
-                        Log.e("REPLAN_DEBUG", "💥 [Task 생성 예외]: ${e.message}")
                         Toast.makeText(this@MainActivity, "저장 중 오류 발생: ${e.message}", Toast.LENGTH_SHORT).show()
                     }
                 }
@@ -1241,11 +1197,10 @@ class MainActivity : AppCompatActivity() {
             val isTitleMatch = cleanTodoName.isNotEmpty() && (
                     genTitleClean.contains(cleanTodoName) || cleanTodoName.contains(genTitleClean)
                     )
-
             isTaskIdMatch || isTitleMatch
         }.sortedBy { it.stepOrder }
 
-        val stepsCount = if (matchedSchedules.isNotEmpty()) matchedSchedules.size else if (todo.desiredSteps > 0) todo.desiredSteps else 5
+        val stepsCount = if (matchedSchedules.isNotEmpty()) matchedSchedules.size else if (todo.desiredSteps > 0) todo.desiredSteps else 3
 
         val tvSubTitle = TextView(this).apply {
             text = "🤖 RePlan AI 추천 계획\n[${todo.name}] (${completedSteps.size}/${stepsCount}단계 완료)"
@@ -1311,22 +1266,19 @@ class MainActivity : AppCompatActivity() {
 
                     tvSubTitle.text = "🤖 RePlan AI 추천 계획\n[${todo.name}] (${completedSteps.size}/${actualStepsList.size}단계 완료)"
 
-                    val isAllDone = matchedSchedules.isNotEmpty() && matchedSchedules.all { it.completed }
+                    val isAllDone = (completedSteps.size == actualStepsList.size) || (matchedSchedules.isNotEmpty() && matchedSchedules.all { it.completed })
 
                     val actualTodoInList = todoList.find { it.id == todo.id || it.name == todo.name } ?: todo
                     actualTodoInList.isCompleted = isAllDone
 
-                    if (isAllDone) {
-                        updateTodoCardCompletion(actualTodoInList, isAllCompleted = true)
-                    } else {
-                        updateTodoCardUncompletion(actualTodoInList)
+                    if (::todoAdapter.isInitialized) {
+                        todoAdapter.notifyDataSetChanged()
                     }
                 }
             }
             rootLayout.addView(checkBox)
         }
 
-        tvSubTitle.text = "🤖 RePlan AI 추천 계획\n[${todo.name}] (${completedSteps.size}/${actualStepsList.size}단계 완료)"
         bottomSheetDialog.setContentView(rootLayout)
         bottomSheetDialog.show()
     }
@@ -1350,18 +1302,10 @@ class MainActivity : AppCompatActivity() {
                     try {
                         val taskIdLong = todoItem.id.toLongOrNull()
                         if (taskIdLong != null) {
-                            Log.d("REPLAN_DEBUG", "🚀 [PATCH /schedules/tasks/$taskIdLong/complete 요청 전송] completed: true")
-
-                            val response = ApiClient.service.updateTaskStatus(
+                            ApiClient.service.updateTaskStatus(
                                 taskId = taskIdLong,
                                 request = UpdateTaskCompletionApiRequest(completed = true)
                             )
-
-                            if (response.isSuccessful) {
-                                Log.d("REPLAN_DEBUG", "✅ [Task 완료 성공]")
-                            } else {
-                                Log.e("REPLAN_DEBUG", "❌ [Task 완료 실패] code: ${response.code()}")
-                            }
                         }
                     } catch (e: Exception) {
                         e.printStackTrace()
@@ -1402,18 +1346,10 @@ class MainActivity : AppCompatActivity() {
                 try {
                     val taskIdLong = todoItem.id.toLongOrNull()
                     if (taskIdLong != null) {
-                        Log.d("REPLAN_DEBUG", "🚀 [PATCH /schedules/tasks/$taskIdLong/complete 요청 전송] completed: false")
-
-                        val response = ApiClient.service.updateTaskStatus(
+                        ApiClient.service.updateTaskStatus(
                             taskId = taskIdLong,
                             request = UpdateTaskCompletionApiRequest(completed = false)
                         )
-
-                        if (response.isSuccessful) {
-                            Log.d("REPLAN_DEBUG", "✅ [Task 완료 취소 성공]")
-                        } else {
-                            Log.e("REPLAN_DEBUG", "❌ [Task 완료 취소 실패] code: ${response.code()}")
-                        }
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -1481,7 +1417,6 @@ class MainActivity : AppCompatActivity() {
         val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.KOREA)
         val baseDateStr = sdf.format(calendar.time)
 
-        // timeStr 포맷 정제 (HH:mm -> HH:mm:00)
         val cleanTime = when {
             timeStr.length == 5 -> "$timeStr:00"
             timeStr.length == 8 -> timeStr
@@ -1498,25 +1433,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun parseGeneratedSchedulesToChanges(list: List<GeneratedScheduleDto>): List<ScheduleChangeDto> {
-        return list.mapIndexed { index, dto ->
-            ScheduleChangeDto(
-                sequence = index + 1,
-                action = if (dto.locked) "FIXED" else "MOVED",
-                taskId = dto.taskId,
-                blockId = dto.blockId,
-                title = dto.title,
-                beforeStartTime = null,
-                beforeEndTime = null,
-                afterStartTime = dto.startTime,
-                afterEndTime = dto.endTime,
-                reasonCode = dto.reasonCode ?: "OPTIMAL",
-                reason = dto.reason ?: "💡 AI가 최적의 시간대로 배치했습니다."
-            )
-        }
-    }
-
     private fun simulateServerLoading(message: String, onComplete: () -> Unit) {
+        if (isFinishing || isDestroyed) return
+
         val builder = AlertDialog.Builder(this)
         val layoutId = resources.getIdentifier("dialog_loading", "layout", packageName)
 
@@ -1534,7 +1453,9 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
 
         Handler(Looper.getMainLooper()).postDelayed({
-            dialog.dismiss()
+            if (!isFinishing && !isDestroyed && dialog.isShowing) {
+                dialog.dismiss()
+            }
             onComplete()
         }, 800)
     }
@@ -1562,8 +1483,6 @@ class MainActivity : AppCompatActivity() {
                     DragEvent.ACTION_DROP -> {
                         targetContainer.setBackgroundColor(Color.TRANSPARENT)
                         if (draggedView != null) {
-                            Log.d("REPLAN_DEBUG", "============== [DRAG DROP EVENT 발생] ==============")
-
                             sourceContainer?.removeView(draggedView)
 
                             val dropY = event.y
@@ -1599,8 +1518,6 @@ class MainActivity : AppCompatActivity() {
 
                             val targetBlockId = tagData.blockId
 
-                            Log.d("REPLAN_DEBUG", "타겟 blockId: $targetBlockId | 시작시간: $calculatedStartTimeIso | 종료시간: $calculatedEndTimeIso")
-
                             if (!targetBlockId.isNullOrEmpty()) {
                                 lifecycleScope.launch {
                                     try {
@@ -1613,24 +1530,14 @@ class MainActivity : AppCompatActivity() {
                                             endTime = calculatedEndTimeIso
                                         )
 
-                                        Log.d("REPLAN_DEBUG", "🚀 [PATCH /schedules/blocks/$targetBlockId 요청 전송]")
-
-                                        val response = ApiClient.service.updateGeneratedScheduleStatus(
+                                        ApiClient.service.updateGeneratedScheduleStatus(
                                             blockId = targetBlockId,
                                             request = updateBody
                                         )
-
-                                        if (response.isSuccessful) {
-                                            Log.d("REPLAN_DEBUG", "✅ [PATCH 요청 성공] 백엔드 응답: ${response.body()?.string()}")
-                                        } else {
-                                            Log.e("REPLAN_DEBUG", "❌ [PATCH 요청 실패] 응답코드: ${response.code()}, error: ${response.errorBody()?.string()}")
-                                        }
                                     } catch (e: Exception) {
-                                        Log.e("REPLAN_DEBUG", "💥 [PATCH 통신 예외 발생]: ${e.message}")
+                                        e.printStackTrace()
                                     }
                                 }
-                            } else {
-                                Log.e("REPLAN_DEBUG", "⚠️ 카드 tagData에 blockId가 없어 요청을 전송하지 못했습니다.")
                             }
                             true
                         } else false
@@ -1702,10 +1609,9 @@ class MainActivity : AppCompatActivity() {
         view.setOnLongClickListener { v ->
             val tagData = v.tag as? ScheduleCardTag
 
-            // ★ [FIX] 이미 완료 처리된(초록색) AI 블록은 드래그 앤 드롭 방지
             val matchedGen = currentGeneratedSchedules.find { it.blockId == tagData?.blockId }
             if (matchedGen?.completed == true) {
-                Toast.makeText(this, "이미 완료된 일정은 이동할 수 없습니다.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "이미 완료된 일정은 이동할 수 없습니다. 🔒", Toast.LENGTH_SHORT).show()
                 return@setOnLongClickListener true
             }
 
