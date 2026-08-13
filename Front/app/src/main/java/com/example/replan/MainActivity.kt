@@ -45,7 +45,7 @@ class MainActivity : AppCompatActivity() {
 
     private val completedStepsMap = mutableMapOf<String, MutableSet<Int>>()
 
-    // ★ [백엔드 가이드 반영] 유저가 미루기로 선택한 Task ID 목록 임시 보관
+    // 유저가 미루기로 선택한 Task ID 목록 임시 보관
     private val pendingPostponedTaskIds = mutableSetOf<Long>()
 
     private var currentWeekCalendar: Calendar = Calendar.getInstance(Locale.KOREA).apply {
@@ -95,9 +95,9 @@ class MainActivity : AppCompatActivity() {
         val btnAddFixed = findViewSafely<Button>("btnAddFixed")
         btnAddFixed?.setOnClickListener { showFixedScheduleBottomSheet() }
 
-        // ★ [가이드 반영] AI 재배치 파이프라인 버튼 연결
+        // ★ [핵심] 자동정렬 버튼 클릭 시 POST /schedules/generate 파이프라인 단독 호출
         val btnAutoSort = findViewSafely<Button>("btnAutoSort")
-        btnAutoSort?.setOnClickListener { executeAiReplanPipeline() }
+        btnAutoSort?.setOnClickListener { executeAiGeneratePipeline() }
 
         val btnPrevWeek = findViewSafely<View>("btnPrevWeek") ?: findViewSafely<View>("btn_prev")
         val btnNextWeek = findViewSafely<View>("btnNextWeek") ?: findViewSafely<View>("btn_next")
@@ -199,7 +199,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // ★ [핵심 수정 1] 기존 todo.desiredSteps 수치(0, 3, 5, 7)를 있는 그대로 유지
         var desiredSteps = todo.desiredSteps
         val aiButtons = listOfNotNull(btnAiNone, btnAi3Steps, btnAi5Steps, btnAi7Steps)
         val stepValues = listOf(0, 3, 5, 7)
@@ -236,7 +235,6 @@ class MainActivity : AppCompatActivity() {
             val expectedMinutes = if (updatedTimeStr.isEmpty()) 120 else updatedTimeStr.toInt() * 60
             val taskIdLong = todo.id.toLongOrNull() ?: return@setOnClickListener
 
-            // ★ [핵심 수정 2] desiredSteps > 0 판단으로 useAiDecomposition 상태 명확히 전달
             val isUseAi = desiredSteps > 0
 
             val updateRequest = CreateTaskApiRequest(
@@ -524,13 +522,12 @@ class MainActivity : AppCompatActivity() {
                                 3 -> "상"; 1 -> "하"; else -> "중"
                             }
 
-                            // ★ [완벽 해결 로직] 서버의 desiredSteps(3, 5, 7)를 있는 그대로 바인딩
                             val rawSteps = task.desiredSteps ?: 3
 
                             val steps = if (task.useAiDecomposition == false || rawSteps == 0) {
-                                0 // 쪼개기 안 함
+                                0
                             } else {
-                                rawSteps // 서버에서 온 3, 5, 7단계 수치 100% 반영
+                                rawSteps
                             }
 
                             val isAllDone = matchedBlocks.isNotEmpty() && matchedBlocks.all { it.completed }
@@ -544,7 +541,7 @@ class MainActivity : AppCompatActivity() {
                                     expectedTime = (task.estimatedMinutes / 60).coerceAtLeast(1),
                                     priority = priorityText,
                                     isCompleted = isAllDone,
-                                    desiredSteps = steps, // 어댑터로 정확히 0, 3, 5, 7 수치 전송
+                                    desiredSteps = steps,
                                     subSteps = emptyList()
                                 )
                             )
@@ -575,46 +572,39 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ★ [백엔드 가이드 반영] 임시로 모아둔 미루기/완료 태스크 ID를 묶어 POST /schedules/replan 전달
-    private fun executeAiReplanPipeline() {
+    // ★ [핵심 함수] 자동정렬 버튼 누를 때 호출되는 POST /schedules/generate 전용 파이프라인
+    private fun executeAiGeneratePipeline() {
         val btnAutoSort = findViewSafely<Button>("btnAutoSort")
         btnAutoSort?.isEnabled = false
 
         val tvAiFeedback = findViewSafely<TextView>("tvAiFeedback")
-        tvAiFeedback?.text = "🤖 AI가 일정을 재배치하고 있습니다..."
+        tvAiFeedback?.text = "🤖 AI가 일정을 생성하고 배치하는 중입니다..."
 
-        val nowIsoTime = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.KOREA).format(Calendar.getInstance().time)
-        val completedIds = todoList.filter { it.isCompleted }.mapNotNull { it.id.toLongOrNull() }
-        val postponedIds = pendingPostponedTaskIds.toList()
-
-        val replanRequest = ReplanApiRequest(
+        val generateRequest = GenerateScheduleApiRequest(
             userId = 1L,
-            replanFromTime = nowIsoTime,
-            completedTaskIds = completedIds,
-            postponedTaskIds = postponedIds
+            weekStartDate = getSelectedWeekStartDate()
         )
 
-        simulateServerLoading("AI 일정을 재배치 중입니다... 🤖") {
+        Log.d("GENERATE_CHECK", "🚀 [POST /schedules/generate] 호출 시도: $generateRequest")
+
+        simulateServerLoading("AI 일정을 자동 정렬 중입니다... 🤖") {
             lifecycleScope.launch {
                 try {
-                    Log.d("REPLAN_DEBUG", "🚀 [POST /schedules/replan] Completed: $completedIds, Postponed: $postponedIds")
-
-                    val response = ApiClient.service.replanSchedules(request = replanRequest)
+                    val response = ApiClient.service.generateSchedules(request = generateRequest)
 
                     if (response.isSuccessful) {
-                        Toast.makeText(this@MainActivity, "일정이 지능적으로 재배치되었습니다! ✨", Toast.LENGTH_SHORT).show()
-
-                        // 전송 성공 시 임시 미루기 데이터 초기화
-                        pendingPostponedTaskIds.clear()
-
-                        // 백엔드가 AI 결과를 DB에 덮어씌웠으므로 주간 스케줄 다시 조회
+                        Log.d("GENERATE_CHECK", "✅ 백엔드 generate 응답 성공: ${response.code()}")
+                        Toast.makeText(this@MainActivity, "AI 일정이 지능적으로 배치되었습니다! ✨", Toast.LENGTH_SHORT).show()
                         loadWeeklySchedulesFromServer()
                     } else {
-                        Toast.makeText(this@MainActivity, "재배치 실패 (${response.code()})", Toast.LENGTH_SHORT).show()
+                        val errorBodyStr = response.errorBody()?.string() ?: "알 수 없는 에러"
+                        Log.e("GENERATE_CHECK", "❌ generate 실패 코드 (${response.code()}): $errorBodyStr")
+                        Toast.makeText(this@MainActivity, "자동정렬 실패 (${response.code()})", Toast.LENGTH_SHORT).show()
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
-                    Toast.makeText(this@MainActivity, "재배치 실패: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Log.e("GENERATE_CHECK", "💥 통신 예외 발생: ${e.message}")
+                    Toast.makeText(this@MainActivity, "통신 에러: ${e.message}", Toast.LENGTH_SHORT).show()
                 } finally {
                     btnAutoSort?.isEnabled = true
                 }
@@ -736,7 +726,6 @@ class MainActivity : AppCompatActivity() {
         recalculateContainerLayout(container)
     }
 
-    // ★ [백엔드 가이드 반영] 클릭 시 즉시 전송이 아닌 임시 목록에 스태킹
     private fun showScheduleActionDialog(gen: GeneratedScheduleDto) {
         val taskIdLong = gen.taskId
         val isAlreadyPostponed = taskIdLong != null && pendingPostponedTaskIds.contains(taskIdLong)
@@ -758,7 +747,7 @@ class MainActivity : AppCompatActivity() {
                                 Toast.makeText(this, "'${gen.title}' 미루기 선택 해제", Toast.LENGTH_SHORT).show()
                             } else {
                                 pendingPostponedTaskIds.add(taskIdLong)
-                                Toast.makeText(this, "'${gen.title}' 미루기 목록에 추가됨 ⏩\n'AI 재배치' 버튼을 누르면 일정이 반영됩니다.", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(this, "'${gen.title}' 미루기 목록에 추가됨 ⏩", Toast.LENGTH_SHORT).show()
                             }
                         } else {
                             Toast.makeText(this, "유효하지 않은 일정 ID입니다.", Toast.LENGTH_SHORT).show()
@@ -917,8 +906,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // MainActivity.kt - showAddTodoBottomSheet() 내부 등록 버튼 클릭 이벤트
-
         btnRegisterTodo?.setOnClickListener {
             val todoName = etTodoName?.text?.toString()?.trim() ?: ""
             val expectedTimeStr = etExpectedTime?.text?.toString()?.trim() ?: ""
@@ -940,19 +927,17 @@ class MainActivity : AppCompatActivity() {
                 getSelectedWeekStartDate()
             }
 
-            // ★ [핵심] 0단계가 아니면 무조건 useAiDecomposition = true 보장
             val isUseAi = desiredSteps > 0
 
             val apiRequest = CreateTaskApiRequest(
                 title = todoName,
                 deadline = safeDeadlineDate,
                 estimatedMinutes = expectedMinutes,
-                useAiDecomposition = isUseAi,  // true/false 명시 전송
-                desiredSteps = desiredSteps,    // 3, 5, 7 수치 명시 전송
+                useAiDecomposition = isUseAi,
+                desiredSteps = desiredSteps,
                 priority = selectedPriorityInt
             )
 
-            // ★ 보낼 데이터 로그 출력
             Log.d("SEND_CHECK", "📤 [최종 백엔드 전송 데이터]: $apiRequest")
 
             bottomSheetDialog.dismiss()
@@ -1279,7 +1264,6 @@ class MainActivity : AppCompatActivity() {
 
         val isNotDecomposed = todo.desiredSteps == 0
 
-        // 실제 바텀시트에 그려질 단계 목록 생성
         val actualStepsList = if (isNotDecomposed) {
             listOf("1단계: [${todo.name}] ${todo.name}")
         } else if (matchedSchedules.isNotEmpty()) {
@@ -1291,7 +1275,6 @@ class MainActivity : AppCompatActivity() {
             List(todo.desiredSteps) { index -> "${index + 1}단계: [${todo.name}] ${todo.name}" }
         }
 
-        // ★ [핵심 수정] 상단 텍스트의 총 단계 수치를 actualStepsList.size 기준으로 동적 바인딩
         val totalStepCount = if (isNotDecomposed) 1 else actualStepsList.size
 
         val tvSubTitle = TextView(this).apply {
@@ -1354,7 +1337,6 @@ class MainActivity : AppCompatActivity() {
                         requestUpdateScheduleStatus(gen = gen, completed = checked)
                     }
 
-                    // 체크 시 상단 텍스트 수치 실시간 업데이트
                     tvSubTitle.text = if (isNotDecomposed) {
                         "📝 단일 작업 계획\n[${todo.name}] (${if (checked) 1 else 0}/1단계 완료)"
                     } else {
