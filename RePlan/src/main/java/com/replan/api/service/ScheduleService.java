@@ -230,7 +230,7 @@ public class ScheduleService {
     }
 
     @Transactional
-    public void generateAiSchedule(Long userId, String weekStartDateParam) {
+    public ReplanResultResponse generateAiSchedule(Long userId, String weekStartDateParam) {
 
         LocalDate weekStartDate = (weekStartDateParam != null && !weekStartDateParam.isBlank())
                 ? LocalDate.parse(weekStartDateParam)
@@ -286,10 +286,53 @@ public class ScheduleService {
 
         saveGeneratedSchedules(safelyControlledBlocks, userId);
         logAiWarnings(response);
+
+        List<String> rawWarnings = new ArrayList<>();
+        if (response.getWarnings() != null) {
+            rawWarnings.addAll(response.getWarnings().stream()
+                    .map(AiWarningResponse::getMessage)
+                    .toList());
+        }
+        if (response.getUnscheduledTasks() != null) {
+            rawWarnings.addAll(response.getUnscheduledTasks().stream()
+                    .map(AiUnscheduledTaskResponse::getReason)
+                    .toList());
+        }
+
+        List<String> distinctWarnings = rawWarnings.stream()
+                .distinct()
+                .toList();
+
+        List<String> warningMessages = new ArrayList<>();
+        boolean hasDeadlineWarning = distinctWarnings.stream().anyMatch(w -> w.contains("마감") || w.contains("시작 시간"));
+
+        if (hasDeadlineWarning) {
+            distinctWarnings.stream()
+                    .filter(w -> w.contains("마감") || w.contains("시작 시간"))
+                    .findFirst()
+                    .ifPresent(warningMessages::add);
+        } else {
+            // 그 외의 경우라면 그냥 중복 제거된 원문 그대로 사용
+            warningMessages.addAll(distinctWarnings);
+        }
+
+        if (!warningMessages.isEmpty()) {
+            return ReplanResultResponse.builder()
+                    .success(false)
+                    .message("일부 일정을 생성하지 못했습니다.")
+                    .warnings(warningMessages)
+                    .build();
+        }
+
+        return ReplanResultResponse.builder()
+                .success(true)
+                .message("AI 스케줄 생성 및 DB 저장 요청 완료")
+                .warnings(List.of())
+                .build();
     }
 
     @Transactional
-    public void replanAiSchedule(
+    public ReplanResultResponse replanAiSchedule(
             Long userId,
             String replanFromTime,
             List<Long> completedTaskIds,
@@ -362,6 +405,32 @@ public class ScheduleService {
         );
 
         logAiWarnings(response);
+
+        List<String> warningMessages = new ArrayList<>();
+        if (response.getWarnings() != null) {
+            warningMessages.addAll(response.getWarnings().stream()
+                    .map(AiWarningResponse::getMessage)
+                    .toList());
+        }
+        if (response.getUnscheduledTasks() != null) {
+            warningMessages.addAll(response.getUnscheduledTasks().stream()
+                    .map(AiUnscheduledTaskResponse::getReason)
+                    .toList());
+        }
+
+        if (!warningMessages.isEmpty()) {
+            return ReplanResultResponse.builder()
+                    .success(false)
+                    .message("일부 일정을 재배치할 수 없습니다.")
+                    .warnings(warningMessages)
+                    .build();
+        }
+
+        return ReplanResultResponse.builder()
+                .success(true)
+                .message("AI 일정 재배치 및 DB 반영 요청 완료!")
+                .warnings(List.of())
+                .build();
     }
 
     private List<AiTaskRequest> buildAiTasks(Long userId) {
