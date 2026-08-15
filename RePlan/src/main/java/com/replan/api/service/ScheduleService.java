@@ -293,7 +293,8 @@ public class ScheduleService {
             Long userId,
             String replanFromTime,
             List<Long> completedTaskIds,
-            List<Long> postponedTaskIds
+            List<Long> postponedTaskIds,
+            List<String> postponedBlockIds
     ) {
         LocalDate weekStartDate = getCurrentWeekStart();
         LocalDate weekEndDate = weekStartDate.plusDays(6);
@@ -310,6 +311,7 @@ public class ScheduleService {
                 .replanFromTime(replanFromTime)
                 .completedTaskIds(toStringIds(completedTaskIds))
                 .postponedTaskIds(toStringIds(postponedTaskIds))
+                .postponedBlockIds(postponedBlockIds)
                 .tasks(aiTasks)
                 .fixedSchedules(buildAiFixedSchedules(userId))
                 .existingSchedules(buildExistingSchedules(userId))
@@ -584,7 +586,10 @@ public class ScheduleService {
                         if (parsedTaskId != null) {
                             Task task = taskRepository.findById(parsedTaskId).orElse(null);
                             if (task != null && task.getTitle() != null) {
-                                finalTitle = "[" + task.getTitle() + "] " + block.getTitle();
+                                String prefix = "[" + task.getTitle() + "]";
+                                if (finalTitle == null || !finalTitle.startsWith(prefix)) {
+                                    finalTitle = prefix + " " + block.getTitle();
+                                }
                             }
                         }
 
