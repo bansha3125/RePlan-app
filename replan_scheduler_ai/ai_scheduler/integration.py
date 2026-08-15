@@ -66,13 +66,16 @@ def _reason_code_from_reason(
 
     return None
 
-
 def _block_to_backend(
     block: dict[str, Any],
     step_metadata: Optional[
         dict[str, Any]
     ] = None,
 ) -> dict[str, Any]:
+    """
+    스케줄러 내부 snake_case 결과를
+    백엔드용 camelCase 결과로 변환한다.
+    """
 
     source = str(
         block.get(
@@ -110,8 +113,28 @@ def _block_to_backend(
             str(raw_task_id)
         )
 
-    # Gemini 세부 단계인 경우
-    if metadata is not None:
+    # -----------------------------------------
+    # Replan에서 보존되는 기존 일정
+    #
+    # 기존 blockId를 절대로 바꾸지 않음
+    # -----------------------------------------
+    if (
+        source == "GENERATED"
+        and bool(
+            block.get(
+                "locked",
+                False,
+            )
+        )
+    ):
+        block_id = (
+            original_block_id
+        )
+
+    # -----------------------------------------
+    # Gemini로 최초 분해한 세부 단계
+    # -----------------------------------------
+    elif metadata is not None:
 
         task_id = str(
             metadata["parentTaskId"]
@@ -126,7 +149,9 @@ def _block_to_backend(
             f"step-{step_order}"
         )
 
-    # 일반 AI 일정
+    # -----------------------------------------
+    # 일반 AI 일정 최초 생성
+    # -----------------------------------------
     elif (
         source == "GENERATED"
         and raw_task_id is not None
@@ -137,7 +162,9 @@ def _block_to_backend(
         )
 
     else:
-        block_id = original_block_id
+        block_id = (
+            original_block_id
+        )
 
     start_time = _dt(
         block["start"]
@@ -147,7 +174,9 @@ def _block_to_backend(
         block["end"]
     )
 
-    reason = block.get("reason")
+    reason = block.get(
+        "reason"
+    )
 
     return {
         "blockId": block_id,
@@ -155,12 +184,16 @@ def _block_to_backend(
         "title": block["title"],
         "stepOrder": step_order,
 
-        "startTime": start_time.isoformat(
-            timespec="seconds"
+        "startTime": (
+            start_time.isoformat(
+                timespec="seconds"
+            )
         ),
 
-        "endTime": end_time.isoformat(
-            timespec="seconds"
+        "endTime": (
+            end_time.isoformat(
+                timespec="seconds"
+            )
         ),
 
         "source": source,
@@ -187,60 +220,6 @@ def _block_to_backend(
 
         "reason": reason,
     }
-    """
-    스케줄러 내부 snake_case 결과를
-    백엔드용 camelCase 결과로 변환한다.
-    """
-
-    source = str(
-        block.get("source", "generated")
-    ).upper()
-
-    task_id = block.get("task_id")
-    original_block_id = str(block["block_id"])
-
-    step_order = (
-        _extract_step_order(original_block_id)
-        if source == "GENERATED"
-        else None
-    )
-
-    if source == "GENERATED" and task_id is not None:
-        block_id = (
-            f"generated:{task_id}:step-{step_order}"
-        )
-    else:
-        block_id = original_block_id
-
-    start_time = _dt(block["start"])
-    end_time = _dt(block["end"])
-
-    reason = block.get("reason")
-
-    return {
-        "blockId": block_id,
-        "taskId": task_id,
-        "title": block["title"],
-        "stepOrder": step_order,
-        "startTime": start_time.isoformat(
-            timespec="seconds"
-        ),
-        "endTime": end_time.isoformat(
-            timespec="seconds"
-        ),
-        "source": source,
-        "locked": bool(
-            block.get("locked", False)
-        ),
-        "completed": bool(
-            block.get("completed", False)
-        ),
-        "reasonCode": _reason_code_from_reason(
-            reason
-        ),
-        "reason": reason,
-    }
-
 
 def tasks_from_gemini_steps(
     steps: list[dict[str, Any]],
@@ -1263,14 +1242,95 @@ def replan_api_from_payload(
     재배치용 내부 입력으로 스케줄러를 실행하고,
     최종 일정 및 changes 배열을 생성한다.
     """
-
     result = schedule_api_from_payload(
         internal_payload
     )
 
+    # -----------------------------------------
+    # Replan용 임시 taskId를
+    # 원래 taskId / blockId / stepOrder로 복구
+    # -----------------------------------------
+
+    replan_metadata = (
+        internal_payload.get(
+            "replan_block_metadata",
+            {},
+        )
+    )
+
+    for schedule in result.get(
+        "schedules",
+        [],
+    ):
+        internal_task_id = str(
+            schedule.get("taskId")
+        )
+
+        metadata = (
+            replan_metadata.get(
+                internal_task_id
+            )
+        )
+
+        if metadata is None:
+            continue
+
+        schedule["taskId"] = (
+            metadata["parentTaskId"]
+        )
+
+        schedule["blockId"] = (
+            metadata["blockId"]
+        )
+
+        schedule["stepOrder"] = (
+            metadata["stepOrder"]
+        )
+
+        schedule["title"] = (
+            metadata["title"]
+        )
+
+    # 미배치 결과에서도 내부 ID 제거
+    for unscheduled in result.get(
+        "unscheduledTasks",
+        [],
+    ):
+        internal_task_id = str(
+            unscheduled.get("taskId")
+        )
+
+        metadata = (
+            replan_metadata.get(
+                internal_task_id
+            )
+        )
+
+        if metadata is None:
+            continue
+
+        unscheduled["taskId"] = (
+            metadata["parentTaskId"]
+        )
+
+        unscheduled["blockId"] = (
+            metadata["blockId"]
+        )
+
+        unscheduled["title"] = (
+            metadata["title"]
+        )
+
+
     final_schedules = (
-        result.get("preservedSchedules", [])
-        + result.get("schedules", [])
+        result.get(
+            "preservedSchedules",
+            [],
+        )
+        + result.get(
+            "schedules",
+            [],
+        )
     )
 
     changes = _build_schedule_changes(
