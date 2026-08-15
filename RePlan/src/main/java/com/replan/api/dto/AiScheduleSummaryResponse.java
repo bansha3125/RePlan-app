@@ -6,10 +6,6 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-/*
- * generate와 replan에서 사용 가능한 모든 count 필드를 포함한다.
- * 응답에 없는 필드는 null로 유지된다.
- */
 @Getter
 @Setter
 @NoArgsConstructor

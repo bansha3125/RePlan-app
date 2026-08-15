@@ -9,11 +9,6 @@ import lombok.Setter;
 import java.util.ArrayList;
 import java.util.List;
 
-/*
- * 백엔드가 AI 서버 POST /ai/schedules/replan 로 전송하는 요청 DTO.
- *
- * 기존 List<Object>를 실제 규격 타입으로 교체했다.
- */
 @Getter
 @Setter
 @NoArgsConstructor
@@ -47,5 +42,4 @@ public class ReplanRequest {
 
     @Builder.Default
     private List<AiExistingScheduleRequest> existingSchedules = new ArrayList<>();
-
 }

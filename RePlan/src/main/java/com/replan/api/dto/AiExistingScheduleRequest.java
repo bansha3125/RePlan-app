@@ -6,9 +6,6 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-/*
- * 재배치 요청의 existingSchedules 항목.
- */
 @Getter
 @Setter
 @NoArgsConstructor

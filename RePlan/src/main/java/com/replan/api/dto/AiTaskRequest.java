@@ -9,12 +9,6 @@ import lombok.Setter;
 import java.util.ArrayList;
 import java.util.List;
 
-/*
- * 백엔드가 AI 서버의 tasks 배열로 전송하는 DTO.
- *
- * AI 경계에서는 taskId를 String으로 통일한다.
- * 백엔드 DB의 Long ID는 String.valueOf(task.getId())로 변환한다.
- */
 @Getter
 @Setter
 @NoArgsConstructor

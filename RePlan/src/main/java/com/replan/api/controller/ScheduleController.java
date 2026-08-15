@@ -35,6 +35,11 @@ public class ScheduleController {
         return ResponseEntity.ok(response);
     }
 
+    @GetMapping("/fixed-schedules")
+    public List<FixedSchedule> getFixedSchedules(@CurrentDevice User user) {
+        return fixedRepository.findByUserId(user.getId());
+    }
+
     @PostMapping("/fixed-schedules")
     public String addFixedSchedule(
             @CurrentDevice User user,
@@ -45,9 +50,12 @@ public class ScheduleController {
         return "고정 일정 저장 성공!";
     }
 
-    @GetMapping("/fixed-schedules")
-    public List<FixedSchedule> getFixedSchedules(@CurrentDevice User user) {
-        return fixedRepository.findByUserId(user.getId());
+    @GetMapping("/tasks")
+    public List<TaskResponse> getTasks(
+            @CurrentDevice User user,
+            @RequestParam(required = false) String weekStartDate
+    ) {
+        return scheduleService.getTasks(user.getId(), weekStartDate);
     }
 
     @PostMapping("/tasks")
@@ -60,13 +68,6 @@ public class ScheduleController {
         return "할 일 저장 성공!";
     }
 
-    @GetMapping("/tasks")
-    public List<TaskResponse> getTasks(
-            @CurrentDevice User user,
-            @RequestParam(required = false) String weekStartDate
-    ) {
-        return scheduleService.getTasks(user.getId(), weekStartDate);
-    }
     @PatchMapping("/tasks/{taskId}")
     public ResponseEntity<Void> updateTask(
             @PathVariable Long taskId,
