@@ -538,7 +538,6 @@ public class ScheduleService {
          */
         generatedRepository.deleteByUserId(userId);
 
-        // [핵심 세이프가드 추가] Task별로 유저가 요청한 desiredSteps(목표 단계 수)를 가져와서 정확히 그 개수만큼만 limit 걸기
         List<Task> userTasks = taskRepository.findByUserId(userId);
         Map<Long, Integer> taskDesiredStepsMap = userTasks.stream()
                 .collect(Collectors.toMap(Task::getTaskId, Task::getDesiredSteps, (existing, replacement) -> existing));
@@ -597,10 +596,16 @@ public class ScheduleService {
 
                         if (isCompleted) {
                             GeneratedSchedule oldSchedule = completedSchedulesBackup.stream()
-                                    .filter(s -> (s.getBlockId() != null && s.getBlockId().equals(block.getBlockId()))
-                                            || (s.getTaskId() != null && s.getTaskId().equals(parsedTaskId)))
+                                    .filter(s ->
+                                            // 1순위: blockId가 정확히 일치
+                                            (s.getBlockId() != null && s.getBlockId().equals(block.getBlockId())) ||
+                                                    // 2순위: taskId와 stepOrder가 동시에 일치
+                                                    (s.getTaskId() != null && s.getTaskId().equals(parsedTaskId)
+                                                            && s.getStepOrder() != null && s.getStepOrder().equals(block.getStepOrder()))
+                                    )
                                     .findFirst()
                                     .orElse(null);
+
                             if (oldSchedule != null) {
                                 finalStartTime = oldSchedule.getStartTime();
                                 finalEndTime = oldSchedule.getEndTime();
