@@ -101,9 +101,9 @@ public class ScheduleController {
     }
 
     @PostMapping("/generate")
-    public String generateAiSchedule(
+    public ResponseEntity<ReplanResultResponse> generateAiSchedule(
             @CurrentDevice User user,
-            @RequestBody(required = false) java.util.Map<String, Object> requestBody // required = false로 변경
+            @RequestBody(required = false) java.util.Map<String, Object> requestBody
     ) {
         String weekStartDate = null;
         if (requestBody != null && requestBody.get("weekStartDate") != null) {
@@ -112,8 +112,8 @@ public class ScheduleController {
 
         log.info("[CONTROLLER 진입] /schedules/generate 호출됨 user={}, weekStartDate={}", user != null ? user.getId() : "null", weekStartDate);
 
-        scheduleService.generateAiSchedule(user.getId(), weekStartDate);
-        return "AI 스케줄 생성 및 DB 저장 요청 완료";
+        ReplanResultResponse response = scheduleService.generateAiSchedule(user.getId(), weekStartDate);
+        return ResponseEntity.ok(response);
     }
 
     @PostMapping("/replan")
