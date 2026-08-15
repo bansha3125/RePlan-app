@@ -10,9 +10,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-/*
- * AI generate/replan 공통 응답 DTO.
- */
 @Getter
 @Setter
 @NoArgsConstructor

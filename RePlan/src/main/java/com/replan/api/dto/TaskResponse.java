@@ -14,6 +14,5 @@ public class TaskResponse {
     private int estimatedMinutes;
     private boolean completed;
     private Integer priority;
-
     private int desiredSteps;
 }

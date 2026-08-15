@@ -52,6 +52,10 @@ public class ScheduleService {
     private final ObjectMapper objectMapper;
     private final jakarta.persistence.EntityManager entityManager;
 
+    // ==========================================
+    // 1. 조회 및 기본 CRUD 영역
+    // ==========================================
+
     public WeeklyScheduleResponse getWeeklySchedules(Long userId, String weekStartDateParam) {
         LocalDate weekStartDate = (weekStartDateParam != null && !weekStartDateParam.isBlank())
                 ? LocalDate.parse(weekStartDateParam)
@@ -59,11 +63,10 @@ public class ScheduleService {
 
         LocalDate weekEndDate = weekStartDate.plusDays(6);
 
-        // 날짜 범위를 LocalDateTime으로 변환 (시작일 00:00:00 ~ 종료일 23:59:59)
         LocalDateTime startDateTime = weekStartDate.atStartOfDay();
         LocalDateTime endDateTime = weekEndDate.atTime(23, 59, 59);
 
-        // 1. 고정 일정 정렬 (1순위: 시작시간, 2순위: 제목 오름차순 등 필요시 설정)
+        // 고정 일정 조회 및 변환
         List<FixedScheduleDto> fixedDtos = fixedRepository.findByUserId(userId)
                 .stream()
                 .sorted(Comparator.comparing(FixedSchedule::getStartTime))
@@ -77,7 +80,7 @@ public class ScheduleService {
                         .build())
                 .toList();
 
-        // 2. 생성된 일정 정렬 (1순위: 시작시간 오름차순, 2순위: stepOrder 순서 등)
+        // 생성된 일정 조회 및 변환
         List<GeneratedScheduleDto> generatedDtos =
                 generatedRepository.findByUserIdAndStartTimeBetween(userId, startDateTime, endDateTime)
                         .stream()
@@ -188,16 +191,12 @@ public class ScheduleService {
 
         if (locked != null) schedule.updateLocked(locked);
 
-        // 1. 일정 완료 상태 업데이트
         if (completed != null) {
             schedule.updateCompleted(completed);
 
-            // 2. 일정이 완료(true)되었다면 같은 taskId를 가진 다른 일정이 남았는지 확인 후 Task 완료 처리
             if (completed && schedule.getTaskId() != null) {
                 checkAndCompleteTask(schedule.getTaskId());
-            }
-            // 3. 반대로 일정이 미완료(false)로 바뀌었다면, 부모 Task도 무조건 미완료(false)로 되돌린다.
-            else if (!completed && schedule.getTaskId() != null) {
+            } else if (!completed && schedule.getTaskId() != null) {
                 Task task = taskRepository.findById(schedule.getTaskId()).orElse(null);
                 if (task != null && task.isCompleted()) {
                     task.updateCompleted(false);
@@ -212,26 +211,18 @@ public class ScheduleService {
         generatedRepository.saveAndFlush(schedule);
     }
 
-    private void checkAndCompleteTask(Long taskId) {
-        if (!generatedRepository.existsByTaskIdAndCompletedFalse(taskId)) {
-            Task task = taskRepository.findById(taskId).orElseThrow();
-            task.updateCompleted(true);
-            taskRepository.save(task);
-        }
-    }
-
     @Transactional
     public void deleteTask(Long taskId, Long userId) {
-        // 1. 관련 AI 생성 일정 먼저 삭제
         generatedRepository.deleteByTaskId(taskId);
-
-        // 2. 본체 Task 삭제
         taskRepository.deleteById(taskId);
     }
 
+    // ==========================================
+    // 2. AI 스케줄 생성 및 재배치(Replan) 영역
+    // ==========================================
+
     @Transactional
     public ReplanResultResponse generateAiSchedule(Long userId, String weekStartDateParam) {
-
         LocalDate weekStartDate = (weekStartDateParam != null && !weekStartDateParam.isBlank())
                 ? LocalDate.parse(weekStartDateParam)
                 : getCurrentWeekStart();
@@ -241,6 +232,7 @@ public class ScheduleService {
         List<AiTaskRequest> aiTasks = buildAiTasks(userId);
         validateUniqueTaskIds(aiTasks);
 
+        // AI 요청 페이로드 구성
         GenerateScheduleRequest aiRequest =
                 GenerateScheduleRequest.builder()
                         .requestId("generate-user-" + userId + "-" + UUID.randomUUID())
@@ -253,6 +245,7 @@ public class ScheduleService {
                         .existingSchedules(new ArrayList<>())
                         .build();
 
+        // AI 서버 통신
         AiScheduleResponse response = postToAi(AI_SERVER_URL, aiRequest);
 
         List<AiScheduleBlockResponse> generatedBlocks =
@@ -266,9 +259,7 @@ public class ScheduleService {
 
         for (Map.Entry<String, List<AiScheduleBlockResponse>> entry : groupedByTask.entrySet()) {
             List<AiScheduleBlockResponse> blocks = entry.getValue();
-
             blocks.sort(Comparator.comparing(b -> b.getStepOrder() != null ? b.getStepOrder() : 0));
-
             safelyControlledBlocks.addAll(blocks);
         }
 
@@ -287,6 +278,7 @@ public class ScheduleService {
         saveGeneratedSchedules(safelyControlledBlocks, userId);
         logAiWarnings(response);
 
+        // 경고 및 미배치 사유 수집 및 정제
         List<String> rawWarnings = new ArrayList<>();
         if (response.getWarnings() != null) {
             rawWarnings.addAll(response.getWarnings().stream()
@@ -312,7 +304,6 @@ public class ScheduleService {
                     .findFirst()
                     .ifPresent(warningMessages::add);
         } else {
-            // 그 외의 경우라면 그냥 중복 제거된 원문 그대로 사용
             warningMessages.addAll(distinctWarnings);
         }
 
@@ -345,6 +336,7 @@ public class ScheduleService {
         List<AiTaskRequest> aiTasks = buildAiTasks(userId);
         validateUniqueTaskIds(aiTasks);
 
+        // AI 재배치 요청 페이로드 구성
         ReplanRequest aiRequest = ReplanRequest.builder()
                 .requestId("replan-user-" + userId + "-" + UUID.randomUUID())
                 .userId(userId)
@@ -360,6 +352,7 @@ public class ScheduleService {
                 .existingSchedules(buildExistingSchedules(userId))
                 .build();
 
+        // AI 서버 통신
         AiScheduleResponse response = postToAi(AI_REPLAN_URL, aiRequest);
 
         if (response.getChanges() != null && !response.getChanges().isEmpty()) {
@@ -376,7 +369,6 @@ public class ScheduleService {
                     GeneratedSchedule schedule = generatedRepository.findByBlockId(change.getBlockId()).orElse(null);
 
                     if (schedule != null) {
-                        // 1. 완료된 블록이거나 locked된 블록은 절대 건드리지 않음 (방어 로직)
                         if (Boolean.TRUE.equals(schedule.getCompleted()) || Boolean.TRUE.equals(schedule.getLocked())) {
                             log.info("[REPLAN SKIP] 완료 또는 잠금 상태인 블록은 제외됩니다: blockId={}", schedule.getBlockId());
                             continue;
@@ -433,6 +425,18 @@ public class ScheduleService {
                 .build();
     }
 
+    // ==========================================
+    // 3. 내부 헬퍼 및 유틸리티 영역
+    // ==========================================
+
+    private void checkAndCompleteTask(Long taskId) {
+        if (!generatedRepository.existsByTaskIdAndCompletedFalse(taskId)) {
+            Task task = taskRepository.findById(taskId).orElseThrow();
+            task.updateCompleted(true);
+            taskRepository.save(task);
+        }
+    }
+
     private List<AiTaskRequest> buildAiTasks(Long userId) {
         return taskRepository.findByUserId(userId)
                 .stream()
@@ -468,11 +472,11 @@ public class ScheduleService {
             return 3;
         }
         switch (frontPriority) {
-            case 3: // 상
+            case 3:
                 return 5;
-            case 2: // 중
+            case 2:
                 return 3;
-            case 1: // 하
+            case 1:
                 return 1;
             default:
                 return frontPriority;
@@ -581,11 +585,6 @@ public class ScheduleService {
             }
         }
 
-        /*
-         * preservedSchedules/finalSchedules에는 fixed 일정도 포함될 수 있으므로
-         * taskId가 있는 일정만 GeneratedSchedule 테이블에 저장한다.
-         * blockId를 기준으로 중복도 제거한다.
-         */
         Map<String, AiScheduleBlockResponse> uniqueSchedules =
                 new LinkedHashMap<>();
 
@@ -614,7 +613,6 @@ public class ScheduleService {
             List<AiScheduleBlockResponse> aiResponse,
             Long userId
     ) {
-        // 1. 기존 일정 중 '완료된(completed = true)' 것들의 blockId만 가볍게 추출해 둔다.
         Set<String> completedBlockIds = generatedRepository.findByUserId(userId)
                 .stream()
                 .filter(schedule -> Boolean.TRUE.equals(schedule.getCompleted()))
@@ -622,16 +620,11 @@ public class ScheduleService {
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
 
-        // 만약 완료된 일정이 있다면, 그 일정들의 엔티티도 따로 조회해서 살려둘 준비를 한다.
         List<GeneratedSchedule> completedSchedulesBackup = generatedRepository.findByUserId(userId)
                 .stream()
                 .filter(schedule -> Boolean.TRUE.equals(schedule.getCompleted()))
                 .toList();
 
-        /*
-         * 결과가 비어 있어도 기존 일정을 먼저 지워야 한다.
-         * 그렇지 않으면 AI가 모든 작업을 미배치한 경우 옛 일정이 남는다.
-         */
         generatedRepository.deleteByUserId(userId);
 
         List<Task> userTasks = taskRepository.findByUserId(userId);
@@ -640,7 +633,6 @@ public class ScheduleService {
 
         List<AiScheduleBlockResponse> controlledAiResponse = new ArrayList<>();
         if (aiResponse != null && !aiResponse.isEmpty()) {
-            // taskId별로 블록들을 그룹화
             Map<String, List<AiScheduleBlockResponse>> groupedByTask = aiResponse.stream()
                     .filter(block -> block.getTaskId() != null && !block.getTaskId().isBlank())
                     .collect(Collectors.groupingBy(AiScheduleBlockResponse::getTaskId));
@@ -650,10 +642,8 @@ public class ScheduleService {
                 List<AiScheduleBlockResponse> blocks = entry.getValue();
                 Long taskId = parseLongTaskId(taskIdStr);
 
-                // stepOrder 순서대로 정렬
                 blocks.sort(Comparator.comparing(b -> b.getStepOrder() != null ? b.getStepOrder() : 0));
 
-                // 해당 Task의 desiredSteps 가져오기 (없으면 제한 없이 다 허용)
                 Integer targetSteps = taskId != null ? taskDesiredStepsMap.get(taskId) : null;
 
                 if (targetSteps != null && targetSteps > 0 && blocks.size() > targetSteps) {
@@ -664,7 +654,6 @@ public class ScheduleService {
                 controlledAiResponse.addAll(blocks);
             }
 
-            // taskId가 없는 블록(일반 블록 등)도 그대로 포함
             aiResponse.stream()
                     .filter(block -> block.getTaskId() == null || block.getTaskId().isBlank())
                     .forEach(controlledAiResponse::add);
@@ -696,9 +685,7 @@ public class ScheduleService {
                         if (isCompleted) {
                             GeneratedSchedule oldSchedule = completedSchedulesBackup.stream()
                                     .filter(s ->
-                                            // 1순위: blockId가 정확히 일치
                                             (s.getBlockId() != null && s.getBlockId().equals(block.getBlockId())) ||
-                                                    // 2순위: taskId와 stepOrder가 동시에 일치
                                                     (s.getTaskId() != null && s.getTaskId().equals(parsedTaskId)
                                                             && s.getStepOrder() != null && s.getStepOrder().equals(block.getStepOrder()))
                                     )
@@ -736,7 +723,6 @@ public class ScheduleService {
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
 
-        // AI 응답 목록에 포함되지 않은 기존 완료 일정들은 새로 빌드해서 안전하게 추가 (영속성 충돌 방지)
         for (GeneratedSchedule oldSchedule : completedSchedulesBackup) {
             if (!newBlockIds.contains(oldSchedule.getBlockId())) {
                 finalSchedulesToSave.add(
@@ -832,7 +818,7 @@ public class ScheduleService {
         return collection == null ? 0 : collection.size();
     }
 
-    private String toJson(Object value) {
+    String toJson(Object value) {
         try {
             return objectMapper.writeValueAsString(value);
         } catch (JsonProcessingException exception) {
