@@ -343,7 +343,6 @@ public class ScheduleService {
                 .map(task -> {
                     int mappedPriority = convertPriorityToAiScale(task.getPriority());
 
-                    // ★ 프론트엔드가 보내지 않아 null인 값들을 안전하게 방어!
                     int difficulty = (task.getDifficulty() != null && task.getDifficulty() > 0) ? task.getDifficulty() : 3;
                     int focusRequired = (task.getFocusRequired() != null && task.getFocusRequired() > 0) ? task.getFocusRequired() : 3;
                     int desiredSteps = (task.getDesiredSteps() > 0) ? task.getDesiredSteps() : 3;
@@ -354,8 +353,8 @@ public class ScheduleService {
                             .estimatedMinutes(task.getEstimatedMinutes())
                             .deadline(task.getDeadline().toString())
                             .priority(mappedPriority)
-                            .difficulty(difficulty)        // 방어한 값 적용
-                            .focusRequired(focusRequired)  // 방어한 값 적용
+                            .difficulty(difficulty)
+                            .focusRequired(focusRequired)
                             .postponeCount(task.getPostponeCount())
                             .completedMinutes(task.getCompletedMinutes())
                             .remainingMinutes(task.getEstimatedMinutes())
@@ -590,16 +589,30 @@ public class ScheduleService {
                             }
                         }
 
-                        // 만약 이 블록이 원래 완료되었던 블록이라면 completed를 true로 강제 유지
                         boolean isCompleted = Boolean.TRUE.equals(block.getCompleted())
                                 || completedBlockIds.contains(block.getBlockId());
+
+                        LocalDateTime finalStartTime = parseDateTime(block.getStartTime(), "startTime");
+                        LocalDateTime finalEndTime = parseDateTime(block.getEndTime(), "endTime");
+
+                        if (isCompleted) {
+                            GeneratedSchedule oldSchedule = completedSchedulesBackup.stream()
+                                    .filter(s -> (s.getBlockId() != null && s.getBlockId().equals(block.getBlockId()))
+                                            || (s.getTaskId() != null && s.getTaskId().equals(parsedTaskId)))
+                                    .findFirst()
+                                    .orElse(null);
+                            if (oldSchedule != null) {
+                                finalStartTime = oldSchedule.getStartTime();
+                                finalEndTime = oldSchedule.getEndTime();
+                            }
+                        }
 
                         return GeneratedSchedule.builder()
                                 .userId(userId)
                                 .taskId(parsedTaskId)
                                 .title(finalTitle)
-                                .startTime(parseDateTime(block.getStartTime(), "startTime"))
-                                .endTime(parseDateTime(block.getEndTime(), "endTime"))
+                                .startTime(finalStartTime)
+                                .endTime(finalEndTime)
                                 .blockId(block.getBlockId())
                                 .stepOrder(block.getStepOrder())
                                 .source(block.getSource())

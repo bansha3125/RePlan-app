@@ -121,7 +121,6 @@ public class ScheduleController {
             @CurrentDevice User user,
             @RequestBody java.util.Map<String, Object> requestBody
     ) {
-        // ★ 2. replan 진입 로그 찍기!
         log.info("[CONTROLLER 진입] /schedules/replan 호출됨 user={}, body={}", user != null ? user.getId() : "null", requestBody);
 
         String replanFromTime = (String) requestBody.get("replanFromTime");
