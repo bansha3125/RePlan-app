@@ -37,6 +37,9 @@ public class ReplanRequest {
     private List<String> postponedTaskIds = new ArrayList<>();
 
     @Builder.Default
+    private List<String> postponedBlockIds = new ArrayList<>();
+
+    @Builder.Default
     private List<AiTaskRequest> tasks = new ArrayList<>();
 
     @Builder.Default
@@ -44,4 +47,5 @@ public class ReplanRequest {
 
     @Builder.Default
     private List<AiExistingScheduleRequest> existingSchedules = new ArrayList<>();
+
 }
