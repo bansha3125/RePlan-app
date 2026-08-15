@@ -319,23 +319,48 @@ public class ScheduleService {
 
         AiScheduleResponse response = postToAi(AI_REPLAN_URL, aiRequest);
 
-        /*
-         * schedules만 저장하면 locked 상태로 preservedSchedules에 들어온
-         * 기존 생성 일정이 DB에서 사라질 수 있다.
-         * finalSchedules가 있으면 이를 사용하고, 없으면
-         * schedules + preservedSchedules를 합친 뒤 FIXED 일정을 제외한다.
-         */
-        List<AiScheduleBlockResponse> generatedBlocks =
-                extractGeneratedBlocks(response);
+        if (response.getChanges() != null && !response.getChanges().isEmpty()) {
+            for (AiScheduleChangeResponse change : response.getChanges()) {
+                if (change.getBlockId() != null && change.getAfterStartTime() != null) {
+
+                    if (postponedBlockIds != null && !postponedBlockIds.isEmpty()) {
+                        if (!postponedBlockIds.contains(change.getBlockId())) {
+                            log.info("[REPLAN SCOPE GUARD] 요청된 미루기 대상이 아니므로 제외합니다: blockId={}", change.getBlockId());
+                            continue;
+                        }
+                    }
+
+                    GeneratedSchedule schedule = generatedRepository.findByBlockId(change.getBlockId()).orElse(null);
+
+                    if (schedule != null) {
+                        // 1. 완료된 블록이거나 locked된 블록은 절대 건드리지 않음 (방어 로직)
+                        if (Boolean.TRUE.equals(schedule.getCompleted()) || Boolean.TRUE.equals(schedule.getLocked())) {
+                            log.info("[REPLAN SKIP] 완료 또는 잠금 상태인 블록은 제외됩니다: blockId={}", schedule.getBlockId());
+                            continue;
+                        }
+
+                        if (change.getAfterStartTime() != null) {
+                            schedule.updateStartTime(LocalDateTime.parse(change.getAfterStartTime()));
+                        }
+                        if (change.getAfterEndTime() != null) {
+                            schedule.updateEndTime(LocalDateTime.parse(change.getAfterEndTime()));
+                        }
+
+                        generatedRepository.save(schedule);
+                        log.info("[REPLAN UPDATE] blockId={}, newStart={}, newEnd={}",
+                                schedule.getBlockId(), schedule.getStartTime(), schedule.getEndTime());
+                    }
+                }
+            }
+        } else {
+            log.warn("[REPLAN] AI 응답에 changes가 없어 시간 업데이트가 스킵되었습니다.");
+        }
 
         log.info(
-                "AI 일정 재배치 성공: 최종 생성 일정 {}개, 변경사항 {}개, 미배치 작업 {}개",
-                generatedBlocks.size(),
-                sizeOf(response.getChanges()),
-                sizeOf(response.getUnscheduledTasks())
+                "AI 일정 재배치 완료: 변경사항 {}개 반영됨",
+                sizeOf(response.getChanges())
         );
 
-        saveGeneratedSchedules(generatedBlocks, userId);
         logAiWarnings(response);
     }
 
