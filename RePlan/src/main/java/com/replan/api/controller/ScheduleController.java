@@ -133,7 +133,12 @@ public class ScheduleController {
         List<Long> postponedTaskIds = requestBody.get("postponedTaskIds") != null ?
                 ((List<?>) requestBody.get("postponedTaskIds")).stream().map(obj -> Long.valueOf(obj.toString())).toList() : List.of();
 
-        scheduleService.replanAiSchedule(user.getId(), replanFromTime, completedTaskIds, postponedTaskIds);
+        @SuppressWarnings("unchecked")
+        List<String> postponedBlockIds = requestBody.get("postponedBlockIds") != null ?
+                ((List<?>) requestBody.get("postponedBlockIds")).stream().map(Object::toString).toList() : List.of();
+
+        scheduleService.replanAiSchedule(user.getId(), replanFromTime, completedTaskIds, postponedTaskIds, postponedBlockIds);
+
         return "AI 일정 재배치 및 DB 반영 요청 완료!";
     }
 }
